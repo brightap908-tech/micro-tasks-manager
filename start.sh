@@ -5,4 +5,4 @@ set -e
 
 echo "▶ Starting Microtask Manager..."
 PORT="${PORT:-5000}"
-exec uvicorn backend.main:app --host 0.0.0.0 --port "$PORT"
+exec uvicorn main:app --host 0.0.0.0 --port "$PORT"
