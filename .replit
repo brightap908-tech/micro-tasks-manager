@@ -1,5 +1,35 @@
+modules = ["nodejs-24", "python-3.11"]
 [nix]
 channel = "stable-25_05"
+packages = ["cargo", "gitFull", "libiconv", "libxcrypt", "openssl", "pkg-config", "playwright-driver", "rustc"]
 
 [agent]
 expertMode = true
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python -m uvicorn backend.main:app --host 0.0.0.0 --port 5000 --reload"
+waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[ports]]
+localPort = 5000
+externalPort = 80

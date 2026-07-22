@@ -1,0 +1,43 @@
+{
+  "name": "workspace",
+  "version": "1.0.0",
+  "description": "Private AI-powered micro tasks automation manager.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/brightap908-tech/micro-tasks-manager.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/brightap908-tech/micro-tasks-manager/issues"
+  },
+  "homepage": "https://github.com/brightap908-tech/micro-tasks-manager#readme",
+  "dependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@tanstack/react-query": "^5.101.4",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "autoprefixer": "^10.5.4",
+    "axios": "^1.18.1",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.4.0",
+    "lucide-react": "^1.25.0",
+    "postcss": "^8.5.21",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-hot-toast": "^2.6.0",
+    "react-router-dom": "^7.18.1",
+    "recharts": "^3.10.0",
+    "tailwind-merge": "^3.6.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5"
+  }
+}
