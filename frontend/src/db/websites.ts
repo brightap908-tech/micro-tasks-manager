@@ -55,5 +55,24 @@ export async function updateWebsite(id: number, data: Partial<Omit<Website, 'id'
 
 export async function deleteWebsite(id: number): Promise<void> {
   const db = await getDB()
+
+  // Cascade: delete all credentials for this website
+  const creds = await db.getAllFromIndex('credentials', 'by_website', id)
+  for (const c of creds) {
+    await db.delete('credentials', c.id)
+  }
+
+  // Unlink tasks (set website_id to undefined so they're not orphaned)
+  const tasks = await db.getAllFromIndex('tasks', 'by_website', id)
+  for (const t of tasks) {
+    await db.put('tasks', { ...t, website_id: undefined })
+  }
+
+  // Delete snapshots for this website
+  const snaps = await db.getAllFromIndex('snapshots', 'by_website', id)
+  for (const s of snaps) {
+    await db.delete('snapshots', s.id)
+  }
+
   await db.delete('websites', id)
 }

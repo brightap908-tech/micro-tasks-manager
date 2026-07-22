@@ -16,6 +16,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from backend.routers import sync
 
@@ -27,6 +30,9 @@ FRONTEND_DIST = os.path.abspath(
 _INDEX_HTML = os.path.join(FRONTEND_DIST, "index.html")
 _ASSETS_DIR = os.path.join(FRONTEND_DIST, "assets")
 
+# Rate limiter — shared state attached to the app so slowapi middleware works
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(
     title="Microtask Manager — Sync Proxy",
     description=(
@@ -35,6 +41,10 @@ app = FastAPI(
     ),
     version="2.0.0",
 )
+
+# Attach limiter to app state (required by slowapi)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,

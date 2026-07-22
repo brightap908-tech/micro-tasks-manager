@@ -1,7 +1,7 @@
 import { Menu, Bell, Zap } from 'lucide-react'
 import { useLocation, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import api from '../api/client'
+import { getUnreadCount } from '../db/notifications'
 
 const PAGE_TITLES: Record<string, string> = {
   '/dashboard':     'Dashboard',
@@ -22,8 +22,8 @@ export default function MobileHeader({ onMenuToggle }: Props) {
 
   const { data: unread = 0 } = useQuery({
     queryKey: ['unread-count'],
-    queryFn: () => api.get('/notifications/unread-count').then(r => r.data.count as number),
-    refetchInterval: 30_000,
+    queryFn: getUnreadCount,
+    refetchInterval: 15_000,
   })
 
   return (
