@@ -1,3 +1,9 @@
+databases:
+  - name: microtask-db
+    plan: free
+    databaseName: microtask_manager
+    user: microtask
+
 services:
   - type: web
     name: microtask-manager
@@ -5,5 +11,15 @@ services:
     buildCommand: pip install -r requirements.txt && cd frontend && npm install && npm run build
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
     envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: microtask-db
+          property: connectionString
+      # Generate once with:
+      #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      # Then set the value in Render's dashboard (Environment tab).
+      # Never rotate this key after credentials are stored — it will corrupt them.
+      - key: ENCRYPTION_KEY
+        sync: false
       - key: PYTHON_VERSION
         value: "3.11.0"

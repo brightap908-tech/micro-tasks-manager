@@ -1,5 +1,10 @@
 """
 SQLAlchemy database models for the Microtask Manager.
+
+Enum columns use native_enum=False so SQLAlchemy stores values as VARCHAR
+instead of creating native PostgreSQL ENUM types.  This avoids "type already
+exists" errors when create_all() is called against an existing schema, and
+makes the models portable between PostgreSQL and SQLite.
 """
 
 from sqlalchemy import (
@@ -71,7 +76,7 @@ class Credential(Base):
     id = Column(Integer, primary_key=True, index=True)
     website_id = Column(Integer, ForeignKey("websites.id", ondelete="CASCADE"), nullable=False)
     username = Column(String(300), nullable=False)
-    encrypted_password = Column(Text, nullable=False)  # Fernet encrypted
+    encrypted_password = Column(Text, nullable=False)  # Fernet-encrypted
     notes = Column(Text, nullable=True)
     last_used = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -86,8 +91,15 @@ class Task(Base):
     title = Column(String(500), nullable=False)
     description = Column(Text, nullable=True)
     url = Column(String(1000), nullable=True)
-    category = Column(SAEnum(TaskCategory), default=TaskCategory.OTHER)
-    status = Column(SAEnum(TaskStatus), default=TaskStatus.PENDING)
+    # native_enum=False → stored as VARCHAR; portable and avoids PG ENUM conflicts
+    category = Column(
+        SAEnum(TaskCategory, native_enum=False),
+        default=TaskCategory.OTHER,
+    )
+    status = Column(
+        SAEnum(TaskStatus, native_enum=False),
+        default=TaskStatus.PENDING,
+    )
     reward = Column(Float, default=0.0)
     currency = Column(String(10), default="USD")
     website_id = Column(Integer, ForeignKey("websites.id"), nullable=True)

@@ -41,7 +41,7 @@ export default function SettingsPage() {
       toast.success('Database restored! Please reload the page.')
       setRestoreFile(null)
     } catch {
-      toast.error('Restore failed. Make sure the file is a valid .db backup.')
+      toast.error('Restore failed. Make sure the file is a valid .json backup.')
     } finally {
       setRestoring(false)
     }
@@ -63,11 +63,11 @@ export default function SettingsPage() {
           <div className="min-w-0">
             <h3 className="text-sm font-semibold text-slate-200">Security</h3>
             <p className="text-sm text-slate-400 mt-1">
-              All credentials are encrypted using Fernet symmetric encryption before being stored locally.
-              Your encryption key is stored in{' '}
-              <code className="text-brand-300 bg-slate-800 px-1 py-0.5 rounded text-xs break-all">.encryption.key</code>
-              {' '}— keep it safe and do not share it.
-              The database is stored entirely on your device.
+              All credentials are encrypted with Fernet symmetric encryption before being stored.
+              The encryption key is read from the{' '}
+              <code className="text-brand-300 bg-slate-800 px-1 py-0.5 rounded text-xs break-all">ENCRYPTION_KEY</code>
+              {' '}environment variable in production — never rotate this key after credentials are saved.
+              Data is persisted in a PostgreSQL cloud database and survives restarts and redeploys.
             </p>
           </div>
         </div>
@@ -137,13 +137,13 @@ export default function SettingsPage() {
           <Upload size={16} className="text-yellow-400" /> Restore from Backup
         </h2>
         <p className="text-xs text-slate-500">
-          Upload a <code className="bg-slate-800 px-1 rounded">.db</code> backup file to restore the database.
-          The current database will be automatically saved as a safety backup first.
+          Upload a <code className="bg-slate-800 px-1 rounded">.json</code> backup file to restore all data.
+          All existing records will be replaced with the contents of the backup.
         </p>
         <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
           <input
             type="file"
-            accept=".db"
+            accept=".json"
             className="text-sm text-slate-400 file:btn-secondary file:mr-3 file:cursor-pointer flex-1"
             onChange={e => setRestoreFile(e.target.files?.[0] ?? null)}
           />
@@ -197,7 +197,7 @@ export default function SettingsPage() {
         <h2 className="text-sm font-semibold text-slate-300">About</h2>
         <p className="text-sm text-slate-500">
           <strong className="text-slate-300">Microtask Manager</strong> v1.0.0 — A private productivity dashboard
-          for organizing work across multiple microtask platforms. All data is stored locally.
+          for organizing work across multiple microtask platforms. Data is persisted in PostgreSQL.
         </p>
         <p className="text-xs text-slate-600">
           ⚠️ This tool does not automate, submit, or falsely complete any tasks. All completions require explicit user confirmation.
