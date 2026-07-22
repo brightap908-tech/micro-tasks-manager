@@ -48,7 +48,7 @@ function SiteForm({
         <label className="label">Description</label>
         <textarea className="input" rows={2} value={form.description} onChange={e => set('description', e.target.value)} placeholder="Optional notes about this website" />
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label className="label">Folder</label>
           <select className="select" value={form.folder_id} onChange={e => set('folder_id', e.target.value ? parseInt(e.target.value) : '')}>
@@ -121,7 +121,7 @@ function CredentialPanel({ websiteId, websiteName }: { websiteId: number; websit
         <h3 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
           <KeyRound size={14} /> Saved Credentials
         </h3>
-        <button className="btn-secondary py-1 px-2 text-xs flex items-center gap-1" onClick={() => setShowAdd(p => !p)}>
+        <button className="btn-secondary py-1 px-2 text-xs" onClick={() => setShowAdd(p => !p)}>
           <Plus size={12} /> Add
         </button>
       </div>
@@ -148,13 +148,13 @@ function CredentialPanel({ websiteId, websiteName }: { websiteId: number; websit
       {creds.map(c => (
         <div key={c.id} className="bg-slate-800/40 rounded-lg p-3 border border-slate-800 space-y-1.5">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-300 font-medium">{c.username}</span>
-              <button className="p-0.5 text-slate-600 hover:text-slate-400" onClick={() => copyToClipboard(c.username, 'Username')}>
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-xs text-slate-300 font-medium truncate">{c.username}</span>
+              <button className="p-0.5 text-slate-600 hover:text-slate-400 touch-manipulation shrink-0" onClick={() => copyToClipboard(c.username, 'Username')}>
                 <Copy size={11} />
               </button>
             </div>
-            <button className="p-1 text-slate-600 hover:text-red-400 transition-colors" onClick={() => deleteCred.mutate(c.id)}>
+            <button className="p-1 text-slate-600 hover:text-red-400 transition-colors touch-manipulation shrink-0" onClick={() => deleteCred.mutate(c.id)}>
               <Trash2 size={12} />
             </button>
           </div>
@@ -163,12 +163,12 @@ function CredentialPanel({ websiteId, websiteName }: { websiteId: number; websit
               {revealed[c.id] ? revealed[c.id] : '••••••••'}
             </span>
             {revealed[c.id] && (
-              <button className="p-0.5 text-slate-600 hover:text-slate-400" onClick={() => copyToClipboard(revealed[c.id], 'Password')}>
+              <button className="p-0.5 text-slate-600 hover:text-slate-400 touch-manipulation" onClick={() => copyToClipboard(revealed[c.id], 'Password')}>
                 <Copy size={11} />
               </button>
             )}
             <button
-              className="ml-auto p-0.5 text-slate-600 hover:text-slate-400"
+              className="ml-auto p-0.5 text-slate-600 hover:text-slate-400 touch-manipulation"
               onClick={() => revealPassword(c.id)}
               disabled={loadingReveal === c.id}
             >
@@ -215,7 +215,7 @@ function WebsiteCard({
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <button
-            className={clsx('p-1.5 rounded-lg transition-colors text-xs', website.is_enabled
+            className={clsx('p-1.5 rounded-lg transition-colors touch-manipulation', website.is_enabled
               ? 'text-green-400 hover:bg-green-500/10'
               : 'text-slate-600 hover:bg-slate-700'
             )}
@@ -224,8 +224,8 @@ function WebsiteCard({
           >
             <Power size={14} />
           </button>
-          <button className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-700 transition-colors" onClick={onEdit}>✏️</button>
-          <button className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors" onClick={onDelete}>
+          <button className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-700 transition-colors touch-manipulation" onClick={onEdit}>✏️</button>
+          <button className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors touch-manipulation" onClick={onDelete}>
             <Trash2 size={14} />
           </button>
         </div>
@@ -236,7 +236,7 @@ function WebsiteCard({
       )}
 
       {/* Stats */}
-      <div className="flex gap-4 text-xs text-slate-500">
+      <div className="flex flex-wrap gap-3 text-xs text-slate-500">
         <span>{website.task_count ?? 0} tasks</span>
         <span>{website.completed_tasks ?? 0} completed</span>
         {(website.total_earnings ?? 0) > 0 && (
@@ -247,14 +247,14 @@ function WebsiteCard({
       {/* Actions */}
       <div className="flex gap-2 flex-wrap">
         <button
-          className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"
+          className="btn-secondary text-xs py-1.5 px-3"
           onClick={() => openUrl(website.login_url)}
         >
           <ExternalLink size={12} /> Login
         </button>
         {website.dashboard_url && (
           <button
-            className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"
+            className="btn-secondary text-xs py-1.5 px-3"
             onClick={() => openUrl(website.dashboard_url!)}
           >
             <ExternalLink size={12} /> Dashboard
@@ -262,7 +262,7 @@ function WebsiteCard({
         )}
         <button
           className={clsx(
-            'text-xs py-1.5 px-3 flex items-center gap-1.5 rounded-lg border transition-colors',
+            'text-xs py-1.5 px-3 flex items-center gap-1.5 rounded-lg border transition-colors touch-manipulation',
             showCreds
               ? 'bg-brand-600/20 text-brand-400 border-brand-700/50'
               : 'btn-secondary',
@@ -340,36 +340,36 @@ export default function WebsitesPage() {
     : websites.filter(w => w.folder_id === activeFolder)
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 sm:space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-slate-100">Websites</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
+          <h1 className="hidden sm:block text-2xl font-bold text-slate-100">Websites</h1>
+          <p className="text-sm text-slate-500">
             {websites.length} sites · {websites.filter(w => w.is_enabled).length} active
           </p>
         </div>
-        <div className="flex gap-2">
-          <button className="btn-secondary flex items-center gap-2" onClick={() => setShowFolder(true)}>
-            <FolderPlus size={15} /> New Folder
+        <div className="flex gap-2 ml-auto sm:ml-0">
+          <button className="btn-secondary" onClick={() => setShowFolder(true)}>
+            <FolderPlus size={15} /> <span className="hidden xs:inline">New Folder</span>
           </button>
-          <button className="btn-primary flex items-center gap-2" onClick={() => setShowSite(true)}>
+          <button className="btn-primary" onClick={() => setShowSite(true)}>
             <Plus size={15} /> Add Website
           </button>
         </div>
       </div>
 
-      {/* Folder tabs */}
+      {/* Folder tabs — scrollable row on mobile */}
       {folders.length > 0 && (
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap scrollbar-hide">
           <button
-            className={clsx('badge px-3 py-1.5 text-sm cursor-pointer transition-colors', activeFolder === 'all' ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200')}
+            className={clsx('badge px-3 py-1.5 text-sm cursor-pointer transition-colors shrink-0', activeFolder === 'all' ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200')}
             onClick={() => setActiveFolder('all')}
           >
             All ({websites.length})
           </button>
           {folders.map(f => (
-            <div key={f.id} className="flex items-center gap-1">
+            <div key={f.id} className="flex items-center gap-1 shrink-0">
               <button
                 className={clsx('badge px-3 py-1.5 text-sm cursor-pointer transition-colors', activeFolder === f.id ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200')}
                 onClick={() => setActiveFolder(f.id)}
@@ -378,20 +378,20 @@ export default function WebsitesPage() {
                 <Folder size={12} className="mr-1" />
                 {f.name} ({websites.filter(w => w.folder_id === f.id).length})
               </button>
-              <button className="text-slate-600 hover:text-red-400 transition-colors p-0.5" onClick={() => deleteFolder.mutate(f.id)}>×</button>
+              <button className="text-slate-600 hover:text-red-400 transition-colors p-0.5 touch-manipulation" onClick={() => deleteFolder.mutate(f.id)}>×</button>
             </div>
           ))}
         </div>
       )}
 
-      {/* Grid */}
+      {/* Grid — 1 col on mobile, 2 on sm, 3 on lg */}
       {filtered.length === 0 ? (
         <EmptyState
           icon={<Globe size={24} />}
           title="No websites added"
           description="Add microtask websites to manage them from one place."
           action={
-            <button className="btn-primary flex items-center gap-2" onClick={() => setShowSite(true)}>
+            <button className="btn-primary" onClick={() => setShowSite(true)}>
               <Plus size={15} /> Add Website
             </button>
           }

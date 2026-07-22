@@ -6,7 +6,7 @@ import {
 import { formatDistanceToNow } from 'date-fns'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, BarChart, Bar, Legend,
+  Tooltip, ResponsiveContainer, BarChart, Bar,
 } from 'recharts'
 import api from '../api/client'
 import type { DashboardStats, DailyStats, ActivityLog } from '../api/client'
@@ -37,15 +37,15 @@ export default function Dashboard() {
   })
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div>
+    <div className="space-y-6 sm:space-y-8">
+      {/* Header — hidden on mobile (shown in MobileHeader) */}
+      <div className="hidden sm:block">
         <h1 className="text-2xl font-bold text-slate-100">Dashboard</h1>
         <p className="text-sm text-slate-500 mt-0.5">Your microtask productivity at a glance</p>
       </div>
 
-      {/* Stat Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Stat Cards — 2 cols on mobile, 4 on desktop */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <StatCard
           label="Total Earnings"
           value={`$${(stats?.total_earnings ?? 0).toFixed(2)}`}
@@ -86,19 +86,18 @@ export default function Dashboard() {
         ].map(({ label, count, color, bg }) => (
           <div key={label} className={`${bg} rounded-xl p-4 border border-slate-800`}>
             <p className="text-xs text-slate-500">{label}</p>
-            <p className={`text-3xl font-bold mt-1 ${color}`}>{count}</p>
+            <p className={`text-2xl sm:text-3xl font-bold mt-1 ${color}`}>{count}</p>
           </div>
         ))}
       </div>
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Earnings chart */}
+      {/* Charts — stack on mobile */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         <div className="card">
           <h2 className="text-sm font-semibold text-slate-300 mb-4 flex items-center gap-2">
             <TrendingUp size={16} className="text-brand-400" /> Earnings — Last 14 Days
           </h2>
-          <ResponsiveContainer width="100%" height={200}>
+          <ResponsiveContainer width="100%" height={180}>
             <AreaChart data={daily} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
               <defs>
                 <linearGradient id="earn" x1="0" y1="0" x2="0" y2="1">
@@ -119,12 +118,11 @@ export default function Dashboard() {
           </ResponsiveContainer>
         </div>
 
-        {/* Tasks completed chart */}
         <div className="card">
           <h2 className="text-sm font-semibold text-slate-300 mb-4 flex items-center gap-2">
             <Activity size={16} className="text-green-400" /> Tasks Completed — Last 14 Days
           </h2>
-          <ResponsiveContainer width="100%" height={200}>
+          <ResponsiveContainer width="100%" height={180}>
             <BarChart data={daily} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
               <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 10 }} tickFormatter={d => d.slice(5)} />

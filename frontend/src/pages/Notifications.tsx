@@ -55,23 +55,26 @@ export default function NotificationsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-100">Notifications</h1>
-          <p className="text-sm text-slate-500 mt-0.5">{unread} unread</p>
+          <h1 className="hidden sm:block text-2xl font-bold text-slate-100">Notifications</h1>
+          <p className="text-sm text-slate-500">{unread} unread</p>
         </div>
-        <div className="flex gap-2">
-          {unread > 0 && (
-            <button className="btn-secondary flex items-center gap-2" onClick={() => markAllRead.mutate()}>
-              <CheckCheck size={15} /> Mark all read
-            </button>
-          )}
-          {notifications.length > 0 && (
-            <button className="btn-danger flex items-center gap-2" onClick={() => clearAll.mutate()}>
-              <Trash2 size={15} /> Clear all
-            </button>
-          )}
-        </div>
+        {(unread > 0 || notifications.length > 0) && (
+          <div className="flex gap-2 flex-wrap">
+            {unread > 0 && (
+              <button className="btn-secondary flex items-center gap-2" onClick={() => markAllRead.mutate()}>
+                <CheckCheck size={15} /> Mark all read
+              </button>
+            )}
+            {notifications.length > 0 && (
+              <button className="btn-danger flex items-center gap-2" onClick={() => clearAll.mutate()}>
+                <Trash2 size={15} /> Clear all
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {notifications.length === 0 ? (
@@ -92,7 +95,7 @@ export default function NotificationsPage() {
               )}
             >
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <p className="text-sm font-medium text-slate-100">{n.title}</p>
                   {!n.is_read && (
                     <span className="w-2 h-2 rounded-full bg-brand-500 shrink-0" />
@@ -106,7 +109,7 @@ export default function NotificationsPage() {
               <div className="flex items-center gap-1 shrink-0">
                 {!n.is_read && (
                   <button
-                    className="p-1.5 rounded-lg text-slate-500 hover:text-green-400 hover:bg-green-500/10 transition-colors"
+                    className="p-1.5 rounded-lg text-slate-500 hover:text-green-400 hover:bg-green-500/10 transition-colors touch-manipulation"
                     title="Mark as read"
                     onClick={() => markRead.mutate(n.id)}
                   >
@@ -114,7 +117,7 @@ export default function NotificationsPage() {
                   </button>
                 )}
                 <button
-                  className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                  className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors touch-manipulation"
                   title="Delete"
                   onClick={() => deleteNotif.mutate(n.id)}
                 >
