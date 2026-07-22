@@ -85,9 +85,20 @@ export interface WebsiteSnapshot {
   status: 'ok' | 'auth_required' | 'error'
   available_balance?: number
   available_tasks?: number
+  pending_tasks?: number
+  completed_tasks?: number
+  total_earnings?: number
   page_title?: string
   error_message?: string
   synced_at: string
+}
+
+export interface SessionCookie {
+  id: number
+  website_id: number
+  encrypted_value: string  // AES-GCM encrypted, base64
+  iv: string               // base64 IV
+  updated_at: string
 }
 
 interface AppDB extends DBSchema {
@@ -102,44 +113,53 @@ interface AppDB extends DBSchema {
   activity_logs: { key: number; value: ActivityLog }
   settings: { key: string; value: Setting }
   snapshots: { key: number; value: WebsiteSnapshot; indexes: { by_website: number } }
+  session_cookies: { key: number; value: SessionCookie; indexes: { by_website: number } }
 }
 
 let _db: IDBPDatabase<AppDB> | null = null
 
 export async function getDB(): Promise<IDBPDatabase<AppDB>> {
   if (_db) return _db
-  _db = await openDB<AppDB>('microtask-manager', 1, {
-    upgrade(db) {
-      // website_folders
-      db.createObjectStore('website_folders', { keyPath: 'id', autoIncrement: true })
+  _db = await openDB<AppDB>('microtask-manager', 2, {
+    upgrade(db, oldVersion) {
+      if (oldVersion < 1) {
+        // website_folders
+        db.createObjectStore('website_folders', { keyPath: 'id', autoIncrement: true })
 
-      // websites
-      const ws = db.createObjectStore('websites', { keyPath: 'id', autoIncrement: true })
-      ws.createIndex('by_enabled', 'is_enabled')
+        // websites
+        const ws = db.createObjectStore('websites', { keyPath: 'id', autoIncrement: true })
+        ws.createIndex('by_enabled', 'is_enabled')
 
-      // credentials
-      const cs = db.createObjectStore('credentials', { keyPath: 'id', autoIncrement: true })
-      cs.createIndex('by_website', 'website_id')
+        // credentials
+        const cs = db.createObjectStore('credentials', { keyPath: 'id', autoIncrement: true })
+        cs.createIndex('by_website', 'website_id')
 
-      // tasks
-      const ts = db.createObjectStore('tasks', { keyPath: 'id', autoIncrement: true })
-      ts.createIndex('by_status', 'status')
-      ts.createIndex('by_website', 'website_id')
-      ts.createIndex('by_category', 'category')
+        // tasks
+        const ts = db.createObjectStore('tasks', { keyPath: 'id', autoIncrement: true })
+        ts.createIndex('by_status', 'status')
+        ts.createIndex('by_website', 'website_id')
+        ts.createIndex('by_category', 'category')
 
-      // notifications
-      const ns = db.createObjectStore('notifications', { keyPath: 'id', autoIncrement: true })
-      ns.createIndex('by_read', 'is_read')
+        // notifications
+        const ns = db.createObjectStore('notifications', { keyPath: 'id', autoIncrement: true })
+        ns.createIndex('by_read', 'is_read')
 
-      // activity_logs
-      db.createObjectStore('activity_logs', { keyPath: 'id', autoIncrement: true })
+        // activity_logs
+        db.createObjectStore('activity_logs', { keyPath: 'id', autoIncrement: true })
 
-      // settings
-      db.createObjectStore('settings', { keyPath: 'key' })
+        // settings
+        db.createObjectStore('settings', { keyPath: 'key' })
 
-      // snapshots
-      const snaps = db.createObjectStore('snapshots', { keyPath: 'id', autoIncrement: true })
-      snaps.createIndex('by_website', 'website_id')
+        // snapshots
+        const snaps = db.createObjectStore('snapshots', { keyPath: 'id', autoIncrement: true })
+        snaps.createIndex('by_website', 'website_id')
+      }
+
+      if (oldVersion < 2) {
+        // session_cookies — one encrypted session cookie per website for proxy auth
+        const sc = db.createObjectStore('session_cookies', { keyPath: 'id', autoIncrement: true })
+        sc.createIndex('by_website', 'website_id')
+      }
     },
   })
   return _db

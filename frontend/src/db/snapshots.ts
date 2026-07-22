@@ -1,6 +1,10 @@
 import { getDB, WebsiteSnapshot, now, nextId } from './index'
 
-export async function saveSnapshot(data: Omit<WebsiteSnapshot, 'id' | 'synced_at'>): Promise<WebsiteSnapshot> {
+export async function saveSnapshot(data: Omit<WebsiteSnapshot, 'id' | 'synced_at'> & {
+  pending_tasks?: number
+  completed_tasks?: number
+  total_earnings?: number
+}): Promise<WebsiteSnapshot> {
   const db = await getDB()
 
   // Remove old snapshots for this website (keep last 10)

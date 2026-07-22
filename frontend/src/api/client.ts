@@ -18,6 +18,9 @@ export interface SyncResult {
   status: 'ok' | 'auth_required' | 'error'
   available_balance: number | null
   available_tasks: number | null
+  pending_tasks: number | null
+  completed_tasks: number | null
+  total_earnings: number | null
   page_title: string | null
   error_message: string | null
   error_detail: string | null
@@ -25,7 +28,7 @@ export interface SyncResult {
   http_status: number | null
 }
 
-export async function syncWebsite(url: string, name: string): Promise<SyncResult> {
-  const { data } = await api.post<SyncResult>('/sync/fetch', { url, name })
+export async function syncWebsite(url: string, name: string, cookies?: string | null): Promise<SyncResult> {
+  const { data } = await api.post<SyncResult>('/sync/fetch', { url, name, cookies: cookies ?? null })
   return data
 }
