@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Start backend and frontend concurrently
+# Production start script — builds the frontend then starts the backend.
 set -e
 
 echo "▶ Building frontend..."
-cd frontend && npm run build && cd ..
+cd frontend && npm install && npm run build && cd ..
 
 echo "▶ Starting Microtask Manager..."
-python -m uvicorn backend.main:app --host 0.0.0.0 --port 5000 --reload
+PORT="${PORT:-5000}"
+exec uvicorn backend.main:app --host 0.0.0.0 --port "$PORT"
