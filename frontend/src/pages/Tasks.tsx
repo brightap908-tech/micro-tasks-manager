@@ -7,8 +7,9 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { clsx } from 'clsx'
-import api from '../api/client'
-import type { Task, Website, TaskStatus, TaskCategory } from '../api/client'
+import { getTasks, createTask, updateTask, deleteTask } from '../db/tasks'
+import { getWebsites } from '../db/websites'
+import type { Task, Website, TaskStatus, TaskCategory } from '../db/index'
 import Modal from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import EmptyState from '../components/ui/EmptyState'
@@ -18,7 +19,6 @@ const CATEGORIES: TaskCategory[] = [
   'instagram','facebook','tiktok','youtube','telegram','x',
   'linkedin','discord','website_visit','survey','app_install','other',
 ]
-
 const STATUSES: TaskStatus[] = ['pending','in_progress','completed','skipped']
 
 const defaultForm = {
@@ -45,7 +45,6 @@ function TaskForm({
         <label className="label">Title *</label>
         <input className="input" required value={form.title} onChange={e => set('title', e.target.value)} placeholder="Task title" />
       </div>
-      {/* Stack on mobile, 2 cols on sm+ */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label className="label">Category</label>
@@ -87,7 +86,7 @@ function TaskForm({
       </div>
       <div>
         <label className="label">Notes</label>
-        <textarea className="input" rows={2} value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="Your notes" />
+        <textarea className="input" rows={2} value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="Private notes" />
       </div>
       <div className="flex justify-end gap-3 pt-2">
         <button type="button" className="btn-secondary" onClick={onCancel}>Cancel</button>
@@ -97,350 +96,256 @@ function TaskForm({
   )
 }
 
-function StatusButton({ task, onUpdate }: { task: Task; onUpdate: (status: TaskStatus) => void }) {
-  const [open, setOpen] = useState(false)
-  const options: { status: TaskStatus; label: string; icon: typeof CheckCircle2 }[] = [
-    { status: 'pending',     label: 'Pending',     icon: Clock },
-    { status: 'in_progress', label: 'In Progress', icon: PlayCircle },
-    { status: 'completed',   label: 'Completed',   icon: CheckCircle2 },
-    { status: 'skipped',     label: 'Skipped',     icon: SkipForward },
-  ]
-  return (
-    <div className="relative">
-      <button
-        className="flex items-center gap-1 text-xs touch-manipulation"
-        onClick={() => setOpen(p => !p)}
-      >
-        <StatusBadge status={task.status} />
-        <ChevronDown size={12} className="text-slate-500" />
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-7 z-20 bg-slate-800 border border-slate-700 rounded-lg shadow-xl py-1 min-w-[140px]">
-            {options.map(({ status, label, icon: Icon }) => (
-              <button
-                key={status}
-                className={clsx(
-                  'w-full flex items-center gap-2 px-3 py-2.5 text-xs hover:bg-slate-700 transition-colors touch-manipulation',
-                  task.status === status ? 'text-brand-400' : 'text-slate-300',
-                )}
-                onClick={() => { onUpdate(status); setOpen(false) }}
-              >
-                <Icon size={13} /> {label}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
-/** Mobile card view for a single task */
-function TaskCard({
-  task, onEdit, onDelete, onUpdateStatus,
-}: {
-  task: Task
-  onEdit: () => void
-  onDelete: () => void
-  onUpdateStatus: (s: TaskStatus) => void
-}) {
-  return (
-    <div className="card space-y-3">
-      {/* Title + actions */}
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-sm font-semibold text-slate-100 leading-snug flex-1">{task.title}</p>
-        <div className="flex items-center gap-1 shrink-0">
-          {task.url && (
-            <a
-              href={task.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="p-1.5 rounded-lg text-slate-500 hover:text-brand-400 hover:bg-brand-500/10 transition-colors touch-manipulation"
-            >
-              <ExternalLink size={14} />
-            </a>
-          )}
-          <button
-            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-700 transition-colors touch-manipulation"
-            onClick={onEdit}
-          >
-            ✏️
-          </button>
-          <button
-            className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors touch-manipulation"
-            onClick={onDelete}
-          >
-            <Trash2 size={14} />
-          </button>
-        </div>
-      </div>
-
-      {task.description && (
-        <p className="text-xs text-slate-500">{task.description}</p>
-      )}
-
-      {/* Badges + meta */}
-      <div className="flex items-center flex-wrap gap-2">
-        <CategoryBadge category={task.category} />
-        <StatusButton task={task} onUpdate={onUpdateStatus} />
-        {task.website?.name && (
-          <span className="text-xs text-slate-500">{task.website.name}</span>
-        )}
-      </div>
-
-      {/* Reward + time */}
-      <div className="flex items-center gap-4 text-xs">
-        {task.reward > 0 ? (
-          <span className="text-green-400 font-semibold flex items-center gap-1">
-            <DollarSign size={11} />{task.reward.toFixed(2)}
-          </span>
-        ) : null}
-        {task.time_spent_seconds > 0 && (
-          <span className="text-slate-500">{Math.round(task.time_spent_seconds / 60)}m</span>
-        )}
-      </div>
-    </div>
-  )
+const STATUS_ACTIONS: Record<TaskStatus, { next: TaskStatus; label: string; icon: React.ReactNode; color: string }> = {
+  pending:     { next: 'in_progress', label: 'Start',    icon: <PlayCircle size={14} />,    color: 'text-blue-400' },
+  in_progress: { next: 'completed',   label: 'Complete', icon: <CheckCircle2 size={14} />,  color: 'text-green-400' },
+  completed:   { next: 'pending',     label: 'Reopen',   icon: <Clock size={14} />,          color: 'text-slate-400' },
+  skipped:     { next: 'pending',     label: 'Reopen',   icon: <Clock size={14} />,          color: 'text-slate-400' },
 }
 
 export default function TasksPage() {
   const qc = useQueryClient()
   const [search, setSearch] = useState('')
-  const [filterStatus, setFilterStatus] = useState('')
-  const [filterCategory, setFilterCategory] = useState('')
-  const [filterWebsite, setFilterWebsite] = useState('')
-  const [sortBy, setSortBy] = useState('created_at')
-  const [sortOrder, setSortOrder] = useState('desc')
+  const [filterStatus, setFilterStatus] = useState<TaskStatus | ''>('')
+  const [filterCategory, setFilterCategory] = useState<TaskCategory | ''>('')
   const [showModal, setShowModal] = useState(false)
   const [editTask, setEditTask] = useState<Task | null>(null)
   const [deleteId, setDeleteId] = useState<number | null>(null)
+  const [expandedId, setExpandedId] = useState<number | null>(null)
 
-  const params = new URLSearchParams()
-  if (search) params.set('search', search)
-  if (filterStatus) params.set('status', filterStatus)
-  if (filterCategory) params.set('category', filterCategory)
-  if (filterWebsite) params.set('website_id', filterWebsite)
-  params.set('sort_by', sortBy)
-  params.set('sort_order', sortOrder)
-  params.set('limit', '200')
-
-  const { data: tasks = [], isLoading } = useQuery<Task[]>({
-    queryKey: ['tasks', params.toString()],
-    queryFn: () => api.get(`/tasks?${params}`).then(r => r.data),
+  const { data: tasks = [], isLoading } = useQuery({
+    queryKey: ['tasks', filterStatus, filterCategory, search],
+    queryFn: () => getTasks({
+      status: filterStatus || undefined,
+      category: filterCategory || undefined,
+      search: search || undefined,
+    }),
   })
 
-  const { data: websites = [] } = useQuery<Website[]>({
+  const { data: websites = [] } = useQuery({
     queryKey: ['websites'],
-    queryFn: () => api.get('/websites').then(r => r.data),
+    queryFn: getWebsites,
   })
+
+  const websiteMap = Object.fromEntries(websites.map(w => [w.id, w]))
 
   const create = useMutation({
-    mutationFn: (data: typeof defaultForm) => api.post('/tasks', {
-      ...data, website_id: data.website_id || null,
+    mutationFn: (d: typeof defaultForm) => createTask({
+      title: d.title,
+      description: d.description || undefined,
+      url: d.url || undefined,
+      category: d.category,
+      status: d.status,
+      reward: d.reward,
+      currency: d.currency,
+      website_id: d.website_id ? Number(d.website_id) : undefined,
+      notes: d.notes || undefined,
     }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tasks'] }); setShowModal(false); toast.success('Task created') },
-    onError: () => toast.error('Failed to create task'),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tasks'] })
+      qc.invalidateQueries({ queryKey: ['task-stats'] })
+      qc.invalidateQueries({ queryKey: ['activity'] })
+      setShowModal(false)
+      toast.success('Task created')
+    },
+    onError: (e) => toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`),
   })
 
   const update = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<typeof defaultForm> }) =>
-      api.put(`/tasks/${id}`, { ...data, website_id: data.website_id || null }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tasks'] }); setEditTask(null); toast.success('Task updated') },
-    onError: () => toast.error('Failed to update task'),
-  })
-
-  const updateStatus = useMutation({
-    mutationFn: ({ id, status }: { id: number; status: TaskStatus }) =>
-      api.patch(`/tasks/${id}/status`, { status }),
+    mutationFn: ({ id, data }: { id: number; data: Partial<Task> }) => updateTask(id, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tasks'] })
-      qc.invalidateQueries({ queryKey: ['dashboard-stats'] })
+      qc.invalidateQueries({ queryKey: ['task-stats'] })
+      qc.invalidateQueries({ queryKey: ['activity'] })
+      setEditTask(null)
     },
+    onError: (e) => toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`),
   })
 
   const deleteMut = useMutation({
-    mutationFn: (id: number) => api.delete(`/tasks/${id}`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tasks'] }); setDeleteId(null); toast.success('Task deleted') },
+    mutationFn: (id: number) => deleteTask(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tasks'] })
+      qc.invalidateQueries({ queryKey: ['task-stats'] })
+      qc.invalidateQueries({ queryKey: ['activity'] })
+      setDeleteId(null)
+      toast.success('Task deleted')
+    },
   })
+
+  const quickStatus = (task: Task) => {
+    const action = STATUS_ACTIONS[task.status]
+    update.mutate({ id: task.id, data: { status: action.next } })
+  }
 
   const totalEarnings = tasks
     .filter(t => t.status === 'completed')
     .reduce((s, t) => s + t.reward, 0)
 
   return (
-    <div className="space-y-5 sm:space-y-6">
+    <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="hidden sm:block text-2xl font-bold text-slate-100">Tasks</h1>
           <p className="text-sm text-slate-500">
-            {tasks.length} tasks · ${totalEarnings.toFixed(2)} earned
+            {tasks.length} task{tasks.length !== 1 ? 's' : ''}
+            {filterStatus || filterCategory || search ? ' (filtered)' : ''}
+            {totalEarnings > 0 && ` · $${totalEarnings.toFixed(2)} earned`}
           </p>
         </div>
-        <button className="btn-primary ml-auto sm:ml-0" onClick={() => setShowModal(true)}>
+        <button className="btn-primary self-start sm:self-auto" onClick={() => setShowModal(true)}>
           <Plus size={16} /> Add Task
         </button>
       </div>
 
       {/* Filters */}
-      <div className="card p-3 sm:p-4">
-        <div className="flex flex-wrap gap-2 sm:gap-3">
-          {/* Search — full width on its own row */}
-          <div className="w-full relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-            <input
-              className="input pl-8"
-              placeholder="Search tasks…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
-          </div>
-          {/* Selects — 2 per row on mobile */}
-          <select className="select flex-1 min-w-[calc(50%-4px)]" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-            <option value="">All statuses</option>
-            {STATUSES.map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
-          </select>
-          <select className="select flex-1 min-w-[calc(50%-4px)]" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
-            <option value="">All categories</option>
-            {CATEGORIES.map(c => <option key={c} value={c}>{c.replace('_', ' ')}</option>)}
-          </select>
-          <select className="select flex-1 min-w-[calc(50%-4px)]" value={filterWebsite} onChange={e => setFilterWebsite(e.target.value)}>
-            <option value="">All websites</option>
-            {websites.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-          </select>
-          <div className="flex gap-2 flex-1 min-w-[calc(50%-4px)]">
-            <select className="select flex-1" value={sortBy} onChange={e => setSortBy(e.target.value)}>
-              <option value="created_at">Date</option>
-              <option value="reward">Reward</option>
-              <option value="title">Title</option>
-              <option value="status">Status</option>
-            </select>
-            <button
-              className="btn-secondary px-3 shrink-0"
-              onClick={() => setSortOrder(p => p === 'desc' ? 'asc' : 'desc')}
-              title="Toggle sort order"
-            >
-              {sortOrder === 'desc' ? '↓' : '↑'}
-            </button>
-          </div>
+      <div className="flex flex-col sm:flex-row gap-2">
+        <div className="relative flex-1">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+          <input
+            className="input pl-8 text-sm"
+            placeholder="Search tasks…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
         </div>
+        <select className="select sm:w-36 text-sm" value={filterStatus} onChange={e => setFilterStatus(e.target.value as TaskStatus | '')}>
+          <option value="">All statuses</option>
+          {STATUSES.map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
+        </select>
+        <select className="select sm:w-36 text-sm" value={filterCategory} onChange={e => setFilterCategory(e.target.value as TaskCategory | '')}>
+          <option value="">All categories</option>
+          {CATEGORIES.map(c => <option key={c} value={c}>{c.replace('_', ' ')}</option>)}
+        </select>
       </div>
 
       {/* Task list */}
       {isLoading ? (
-        <div className="text-center py-16 text-slate-500 text-sm">Loading tasks…</div>
+        <div className="space-y-2">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="card animate-pulse flex items-center gap-3">
+              <div className="w-16 h-5 bg-slate-700 rounded" />
+              <div className="flex-1 h-4 bg-slate-700 rounded" />
+              <div className="w-12 h-4 bg-slate-700 rounded" />
+            </div>
+          ))}
+        </div>
       ) : tasks.length === 0 ? (
         <EmptyState
-          icon={<CheckCircle2 size={24} />}
-          title="No tasks found"
-          description="Add your first task or adjust the filters."
-          action={
+          icon={<CheckCircle2 size={32} />}
+          title="No tasks yet"
+          description={search || filterStatus || filterCategory
+            ? 'No tasks match your filters. Try changing the search or filters.'
+            : 'Add your first task to start tracking your microtask work.'}
+          action={!search && !filterStatus && !filterCategory ? (
             <button className="btn-primary" onClick={() => setShowModal(true)}>
               <Plus size={15} /> Add Task
             </button>
-          }
+          ) : undefined}
         />
       ) : (
-        <>
-          {/* Mobile card list (< md) */}
-          <div className="md:hidden space-y-3">
-            {tasks.map(task => (
-              <TaskCard
-                key={task.id}
-                task={task}
-                onEdit={() => setEditTask(task)}
-                onDelete={() => setDeleteId(task.id)}
-                onUpdateStatus={status => updateStatus.mutate({ id: task.id, status })}
-              />
-            ))}
-          </div>
+        <div className="space-y-2">
+          {tasks.map(task => {
+            const isExpanded = expandedId === task.id
+            const action = STATUS_ACTIONS[task.status]
+            const site = task.website_id ? websiteMap[task.website_id] : undefined
 
-          {/* Desktop table (md+) */}
-          <div className="hidden md:block card overflow-hidden p-0">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-xs text-slate-500 bg-slate-800/60 border-b border-slate-800">
-                    <th className="text-left px-4 py-3">Task</th>
-                    <th className="text-left px-4 py-3">Category</th>
-                    <th className="text-left px-4 py-3">Status</th>
-                    <th className="text-left px-4 py-3">Website</th>
-                    <th className="text-right px-4 py-3">Reward</th>
-                    <th className="text-right px-4 py-3">Time</th>
-                    <th className="px-4 py-3"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800">
-                  {tasks.map(task => (
-                    <tr key={task.id} className="hover:bg-slate-800/30 transition-colors group">
-                      <td className="px-4 py-3">
-                        <p className="text-slate-200 font-medium truncate max-w-xs">{task.title}</p>
-                        {task.description && (
-                          <p className="text-xs text-slate-500 truncate max-w-xs mt-0.5">{task.description}</p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <CategoryBadge category={task.category} />
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatusButton
-                          task={task}
-                          onUpdate={status => updateStatus.mutate({ id: task.id, status })}
-                        />
-                      </td>
-                      <td className="px-4 py-3 text-slate-500 text-xs">
-                        {task.website?.name ?? '—'}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        {task.reward > 0 ? (
-                          <span className="text-green-400 font-semibold">${task.reward.toFixed(2)}</span>
-                        ) : (
-                          <span className="text-slate-600">—</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-right text-slate-500 text-xs">
-                        {task.time_spent_seconds > 0
-                          ? `${Math.round(task.time_spent_seconds / 60)}m`
-                          : '—'}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          {task.url && (
-                            <a
-                              href={task.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="p-1.5 rounded-lg text-slate-500 hover:text-brand-400 hover:bg-brand-500/10 transition-colors"
-                              title="Open task URL"
-                            >
-                              <ExternalLink size={14} />
-                            </a>
-                          )}
-                          <button
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-700 transition-colors"
-                            title="Edit"
-                            onClick={() => setEditTask(task)}
-                          >
-                            ✏️
-                          </button>
-                          <button
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                            title="Delete"
-                            onClick={() => setDeleteId(task.id)}
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </>
+            return (
+              <div
+                key={task.id}
+                className="card hover:border-slate-700 transition-colors cursor-pointer"
+                onClick={() => setExpandedId(isExpanded ? null : task.id)}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 mb-1">
+                      <StatusBadge status={task.status} />
+                      <CategoryBadge category={task.category} />
+                      {site && (
+                        <span className="text-xs text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded">
+                          {site.name}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm font-medium text-slate-100 truncate">{task.title}</p>
+                    {task.description && !isExpanded && (
+                      <p className="text-xs text-slate-500 mt-0.5 truncate">{task.description}</p>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    {task.reward > 0 && (
+                      <span className="text-xs text-green-400 font-medium flex items-center gap-0.5">
+                        <DollarSign size={11} />{task.reward.toFixed(2)}
+                      </span>
+                    )}
+                    <ChevronDown
+                      size={14}
+                      className={clsx('text-slate-500 transition-transform', isExpanded && 'rotate-180')}
+                    />
+                  </div>
+                </div>
+
+                {/* Expanded detail */}
+                {isExpanded && (
+                  <div
+                    className="mt-3 pt-3 border-t border-slate-800 space-y-3"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    {task.description && (
+                      <p className="text-sm text-slate-400">{task.description}</p>
+                    )}
+                    {task.notes && (
+                      <p className="text-xs text-slate-500 bg-slate-800/60 rounded-lg px-3 py-2">{task.notes}</p>
+                    )}
+                    {task.url && (
+                      <a
+                        href={task.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-brand-400 hover:text-brand-300"
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <ExternalLink size={11} /> Open task URL
+                      </a>
+                    )}
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        className={clsx('btn-secondary text-xs py-1 px-2.5 flex items-center gap-1', action.color)}
+                        onClick={() => quickStatus(task)}
+                        disabled={update.isPending}
+                      >
+                        {action.icon} {action.label}
+                      </button>
+                      {task.status !== 'skipped' && (
+                        <button
+                          className="btn-secondary text-xs py-1 px-2.5 flex items-center gap-1 text-slate-400"
+                          onClick={() => update.mutate({ id: task.id, data: { status: 'skipped' } })}
+                          disabled={update.isPending}
+                        >
+                          <SkipForward size={14} /> Skip
+                        </button>
+                      )}
+                      <button
+                        className="btn-secondary text-xs py-1 px-2.5"
+                        onClick={() => setEditTask(task)}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        className="btn-secondary text-xs py-1 px-2.5 text-red-400 hover:text-red-300 ml-auto"
+                        onClick={() => setDeleteId(task.id)}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
       )}
 
       {/* Create modal */}
@@ -470,14 +375,23 @@ export default function TasksPage() {
               notes: editTask.notes ?? '',
             }}
             websites={websites}
-            onSave={d => update.mutate({ id: editTask.id, data: d })}
+            onSave={d => update.mutate({ id: editTask.id, data: {
+              title: d.title,
+              description: d.description || undefined,
+              url: d.url || undefined,
+              category: d.category,
+              status: d.status,
+              reward: d.reward,
+              currency: d.currency,
+              website_id: d.website_id ? Number(d.website_id) : undefined,
+              notes: d.notes || undefined,
+            }})}
             onCancel={() => setEditTask(null)}
             loading={update.isPending}
           />
         </Modal>
       )}
 
-      {/* Delete confirm */}
       <ConfirmDialog
         open={deleteId !== null}
         onClose={() => setDeleteId(null)}

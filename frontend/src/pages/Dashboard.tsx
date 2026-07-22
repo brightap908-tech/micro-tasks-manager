@@ -1,8 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   DollarSign, CheckSquare, Clock, Globe,
-  TrendingUp, AlertCircle, Activity, Timer,
-  RefreshCw, Wallet, CheckCircle, XCircle, AlertTriangle,
+  AlertCircle, Timer, RefreshCw, Wallet,
+  CheckCircle, XCircle, AlertTriangle,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import {
@@ -10,9 +10,16 @@ import {
   Tooltip, ResponsiveContainer, BarChart, Bar,
 } from 'recharts'
 import toast from 'react-hot-toast'
-import api from '../api/client'
-import type { DashboardStats, DailyStats, ActivityLog, SyncAllResult } from '../api/client'
+import { getTaskStats, getDailyStats } from '../db/tasks'
+import { getWebsites } from '../db/websites'
+import { getActivityLogs } from '../db/activity'
+import { getSyncStatus, saveSnapshot } from '../db/snapshots'
+import { syncWebsite } from '../api/client'
+import type { SyncResult } from '../api/client'
+import type { Website } from '../db/index'
 import StatCard from '../components/ui/StatCard'
+import { logActivity } from '../db/activity'
+import { createNotification } from '../db/notifications'
 
 function fmt(s: number) {
   const h = Math.floor(s / 3600)
@@ -44,63 +51,155 @@ function SyncStatusBadge({ status }: { status: string }) {
   )
 }
 
-/** Skeleton pulse block */
 function Skeleton({ className = '' }: { className?: string }) {
   return <div className={`animate-pulse rounded bg-slate-700/60 ${className}`} />
+}
+
+async function runSyncAll(websites: Website[]) {
+  const enabled = websites.filter(w => w.is_enabled)
+  if (enabled.length === 0) return { total: 0, succeeded: 0, results: [] }
+
+  const results: Array<{ website: Website; result: SyncResult }> = []
+
+  for (const site of enabled) {
+    const url = site.dashboard_url || site.login_url
+    try {
+      const result = await syncWebsite(url, site.name)
+      await saveSnapshot({
+        website_id: site.id,
+        status: result.status,
+        available_balance: result.available_balance ?? undefined,
+        available_tasks: result.available_tasks ?? undefined,
+        page_title: result.page_title ?? undefined,
+        error_message: result.error_message ?? undefined,
+      })
+      results.push({ website: site, result })
+    } catch (err) {
+      const errorDetail = err instanceof Error ? err.message : String(err)
+      await saveSnapshot({
+        website_id: site.id,
+        status: 'error',
+        error_message: `Network error: ${errorDetail}`,
+      })
+      results.push({
+        website: site,
+        result: {
+          status: 'error',
+          available_balance: null,
+          available_tasks: null,
+          page_title: null,
+          error_message: `Network error: ${errorDetail}`,
+          error_detail: errorDetail,
+          synced_at: new Date().toISOString(),
+          http_status: null,
+        },
+      })
+    }
+  }
+
+  const succeeded = results.filter(r => r.result.status === 'ok').length
+  await logActivity(
+    `Synced ${succeeded}/${enabled.length} websites`,
+    results
+      .filter(r => r.result.status !== 'ok')
+      .map(r => `${r.website.name}: ${r.result.error_message ?? r.result.status}`)
+      .join('; ') || undefined,
+  )
+
+  // Create notifications for errors
+  for (const { website, result } of results) {
+    if (result.status === 'error') {
+      await createNotification({
+        title: `Sync failed: ${website.name}`,
+        message: result.error_message ?? 'Unknown error',
+        type: 'error',
+        website_id: website.id,
+      })
+    } else if (result.status === 'auth_required') {
+      await createNotification({
+        title: `Login required: ${website.name}`,
+        message: result.error_message ?? 'Redirected to login page',
+        type: 'warning',
+        website_id: website.id,
+      })
+    }
+  }
+
+  return { total: enabled.length, succeeded, results }
 }
 
 export default function Dashboard() {
   const qc = useQueryClient()
 
-  const {
-    data: stats,
-    isLoading: statsLoading,
-    isError: statsError,
-  } = useQuery<DashboardStats>({
-    queryKey: ['dashboard-stats'],
-    queryFn: () => api.get('/reports/dashboard').then(r => r.data),
+  const { data: websites = [] } = useQuery({
+    queryKey: ['websites'],
+    queryFn: getWebsites,
+  })
+
+  const { data: stats, isLoading: statsLoading } = useQuery({
+    queryKey: ['task-stats'],
+    queryFn: getTaskStats,
     refetchInterval: 60_000,
   })
 
-  const { data: daily = [], isLoading: dailyLoading } = useQuery<DailyStats[]>({
+  const { data: syncInfo } = useQuery({
+    queryKey: ['sync-status', websites.map(w => w.id)],
+    queryFn: () => getSyncStatus(websites.filter(w => w.is_enabled).map(w => w.id)),
+    enabled: websites.length > 0,
+  })
+
+  const { data: daily = [], isLoading: dailyLoading } = useQuery({
     queryKey: ['daily-stats'],
-    queryFn: () => api.get('/reports/daily?days=14').then(r => r.data),
+    queryFn: () => getDailyStats(14),
   })
 
-  const { data: activity = [], isLoading: activityLoading } = useQuery<ActivityLog[]>({
+  const { data: activity = [], isLoading: activityLoading } = useQuery({
     queryKey: ['activity'],
-    queryFn: () => api.get('/reports/activity?limit=8').then(r => r.data),
+    queryFn: () => getActivityLogs(8),
   })
 
-  const syncMutation = useMutation<SyncAllResult>({
-    mutationFn: () => api.post('/sync/all').then(r => r.data),
+  const syncMutation = useMutation({
+    mutationFn: () => runSyncAll(websites),
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ['dashboard-stats'] })
-      qc.invalidateQueries({ queryKey: ['daily-stats'] })
+      qc.invalidateQueries({ queryKey: ['sync-status'] })
+      qc.invalidateQueries({ queryKey: ['task-stats'] })
       qc.invalidateQueries({ queryKey: ['activity'] })
+      qc.invalidateQueries({ queryKey: ['notifications'] })
+
       if (data.total === 0) {
         toast('No enabled websites to sync. Add a website first.')
       } else if (data.succeeded === data.total) {
         toast.success(`Synced ${data.total} site${data.total !== 1 ? 's' : ''} successfully`)
       } else {
-        const failed = data.results.filter(r => r.status !== 'ok')
+        const failed = data.results.filter(r => r.result.status !== 'ok')
         const msgs = failed.map(r =>
-          r.status === 'auth_required'
-            ? `${r.website_name}: login required`
-            : `${r.website_name}: ${r.error_message ?? 'error'}`
+          r.result.status === 'auth_required'
+            ? `${r.website.name}: login required`
+            : `${r.website.name}: ${r.result.error_message ?? 'error'}`
         )
-        toast(`${data.succeeded}/${data.total} synced. Issues:\n${msgs.join('\n')}`, {
-          duration: 6000,
+        toast(`${data.succeeded}/${data.total} synced.\n${msgs.join('\n')}`, {
+          duration: 8000,
           icon: data.succeeded > 0 ? '⚠️' : '❌',
         })
+        // Show detailed errors in console for debugging
+        for (const { website, result } of failed) {
+          if (result.error_detail) {
+            console.error(`[Sync] ${website.name}:\n${result.error_detail}`)
+          }
+        }
       }
     },
-    onError: () => {
-      toast.error('Sync failed — check server logs')
+    onError: (err) => {
+      console.error('[Sync] Fatal error:', err)
+      toast.error(`Sync failed: ${err instanceof Error ? err.message : String(err)}`)
     },
   })
 
   const isSyncing = syncMutation.isPending
+  const activeWebsites = websites.filter(w => w.is_enabled)
+  const totalBalance = (syncInfo?.available_balance ?? 0)
+  const syncStatus = syncInfo?.status ?? 'never'
+  const lastSync = syncInfo?.last_sync_at
 
   return (
     <div className="space-y-6 sm:space-y-8">
@@ -111,157 +210,129 @@ export default function Dashboard() {
           <p className="text-sm text-slate-500 mt-0.5">Your microtask productivity at a glance</p>
         </div>
         <div className="flex items-center gap-3">
-          {stats && (
-            <div className="text-right">
-              <SyncStatusBadge status={stats.sync_status} />
-              {stats.last_sync_at && (
-                <p className="text-xs text-slate-600 mt-0.5">
-                  {formatDistanceToNow(new Date(stats.last_sync_at), { addSuffix: true })}
-                </p>
-              )}
-            </div>
-          )}
+          <div className="text-right">
+            <SyncStatusBadge status={syncStatus} />
+            {lastSync && (
+              <p className="text-xs text-slate-600 mt-0.5">
+                {formatDistanceToNow(new Date(lastSync), { addSuffix: true })}
+              </p>
+            )}
+          </div>
           <button
+            className="btn-primary"
             onClick={() => syncMutation.mutate()}
             disabled={isSyncing}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
           >
-            <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
+            <RefreshCw size={15} className={isSyncing ? 'animate-spin' : ''} />
             {isSyncing ? 'Syncing…' : 'Sync All'}
           </button>
         </div>
       </div>
 
-      {/* Mobile sync bar */}
-      <div className="flex sm:hidden items-center justify-between">
-        <div>
-          {stats && <SyncStatusBadge status={stats.sync_status} />}
-        </div>
+      {/* Mobile sync button */}
+      <div className="sm:hidden flex items-center justify-between">
+        <SyncStatusBadge status={syncStatus} />
         <button
+          className="btn-primary text-xs py-1.5 px-3"
           onClick={() => syncMutation.mutate()}
           disabled={isSyncing}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white text-xs font-medium"
         >
-          <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} />
-          {isSyncing ? 'Syncing…' : 'Sync'}
+          <RefreshCw size={13} className={isSyncing ? 'animate-spin' : ''} />
+          {isSyncing ? 'Syncing…' : 'Sync All'}
         </button>
       </div>
 
-      {/* API error banner */}
-      {statsError && (
-        <div className="flex items-center gap-3 p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm">
-          <XCircle size={16} className="shrink-0" />
-          <span>Failed to load dashboard data — check that the server is running and try refreshing.</span>
-        </div>
-      )}
-
-      {/* Stat Cards — 2 cols mobile → 3 cols md → 6 cols xl */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4">
-        {/* Available Balance — highlighted */}
+      {/* Stat cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
         {statsLoading ? (
-          <div className="col-span-2 md:col-span-1 card flex items-center gap-3">
-            <Skeleton className="w-9 h-9 rounded-lg" />
-            <div className="flex-1 space-y-2">
+          Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="card space-y-3">
+              <Skeleton className="h-3 w-20" />
+              <Skeleton className="h-7 w-16" />
               <Skeleton className="h-3 w-24" />
-              <Skeleton className="h-6 w-16" />
-            </div>
-          </div>
-        ) : (
-          <StatCard
-            label="Available Balance"
-            value={`$${(stats?.available_balance ?? 0).toFixed(2)}`}
-            icon={<Wallet size={18} />}
-            color="yellow"
-            sub={
-              stats?.sync_status === 'never'
-                ? 'Click Sync to fetch'
-                : stats?.sync_status === 'error'
-                ? 'Sync error — check sites'
-                : 'From connected sites'
-            }
-          />
-        )}
-
-        {statsLoading ? (
-          Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="card flex items-center gap-3">
-              <Skeleton className="w-9 h-9 rounded-lg" />
-              <div className="flex-1 space-y-2">
-                <Skeleton className="h-3 w-20" />
-                <Skeleton className="h-6 w-12" />
-              </div>
             </div>
           ))
         ) : (
           <>
             <StatCard
+              icon={<Wallet size={18} />}
+              label="Available Balance"
+              value={`$${totalBalance.toFixed(2)}`}
+              sub="Click Sync to fetch"
+              color="yellow"
+            />
+            <StatCard
+              icon={<DollarSign size={18} />}
               label="Total Earnings"
               value={`$${(stats?.total_earnings ?? 0).toFixed(2)}`}
-              icon={<DollarSign size={18} />}
-              color="green"
               sub="All completed tasks"
+              color="green"
             />
             <StatCard
-              label="Tasks Completed"
-              value={stats?.tasks_completed ?? 0}
               icon={<CheckSquare size={18} />}
-              color="indigo"
+              label="Tasks Completed"
+              value={String(stats?.tasks_completed ?? 0)}
               sub={`${stats?.tasks_pending ?? 0} pending`}
+              color="blue"
             />
             <StatCard
+              icon={<Timer size={18} />}
               label="Time Today"
               value={fmt(stats?.time_spent_today_seconds ?? 0)}
-              icon={<Timer size={18} />}
-              color="blue"
-              sub={`${fmt(stats?.time_spent_week_seconds ?? 0)} this week`}
-            />
-            <StatCard
-              label="Connected Sites"
-              value={stats?.connected_websites ?? 0}
-              icon={<Globe size={18} />}
+              sub={fmt(stats?.time_spent_week_seconds ?? 0) + ' this week'}
               color="purple"
-              sub={`${stats?.active_websites ?? 0} active`}
             />
             <StatCard
+              icon={<Globe size={18} />}
+              label="Connected Sites"
+              value={String(activeWebsites.length)}
+              sub={`${activeWebsites.length} active`}
+              color="indigo"
+            />
+            <StatCard
+              icon={<AlertCircle size={18} />}
               label="In Progress"
-              value={stats?.tasks_in_progress ?? 0}
-              icon={<Activity size={18} />}
-              color="red"
+              value={String(stats?.tasks_in_progress ?? 0)}
               sub={`${stats?.tasks_skipped ?? 0} skipped`}
+              color="red"
             />
           </>
         )}
       </div>
 
-      {/* Task Status Summary */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          { label: 'Pending',     count: stats?.tasks_pending ?? 0,     color: 'text-slate-300',  bg: 'bg-slate-800' },
-          { label: 'In Progress', count: stats?.tasks_in_progress ?? 0, color: 'text-blue-400',   bg: 'bg-blue-500/10' },
-          { label: 'Completed',   count: stats?.tasks_completed ?? 0,   color: 'text-green-400',  bg: 'bg-green-500/10' },
-          { label: 'Skipped',     count: stats?.tasks_skipped ?? 0,     color: 'text-slate-500',  bg: 'bg-slate-800/50' },
-        ].map(({ label, count, color, bg }) => (
-          <div key={label} className={`${bg} rounded-xl p-4 border border-slate-800`}>
-            <p className="text-xs text-slate-500">{label}</p>
-            {statsLoading
-              ? <Skeleton className="h-8 w-10 mt-1" />
-              : <p className={`text-2xl sm:text-3xl font-bold mt-1 ${color}`}>{count}</p>
-            }
-          </div>
-        ))}
+      {/* Status row */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+        {(['pending', 'in_progress', 'completed', 'skipped'] as const).map(s => {
+          const count = stats
+            ? s === 'pending' ? stats.tasks_pending
+            : s === 'in_progress' ? stats.tasks_in_progress
+            : s === 'completed' ? stats.tasks_completed
+            : stats.tasks_skipped
+            : 0
+          const colors: Record<string, string> = {
+            pending: 'text-slate-300',
+            in_progress: 'text-blue-400',
+            completed: 'text-green-400',
+            skipped: 'text-slate-500',
+          }
+          return (
+            <div key={s} className="card">
+              <p className="text-xs text-slate-500 capitalize">{s.replace('_', ' ')}</p>
+              <p className={`text-3xl font-bold mt-1 ${colors[s]}`}>{statsLoading ? '…' : count}</p>
+            </div>
+          )
+        })}
       </div>
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         <div className="card">
-          <h2 className="text-sm font-semibold text-slate-300 mb-4 flex items-center gap-2">
-            <TrendingUp size={16} className="text-brand-400" /> Earnings — Last 14 Days
-          </h2>
+          <h2 className="text-sm font-semibold text-slate-300 mb-4">Earnings — Last 14 Days</h2>
           {dailyLoading ? (
-            <Skeleton className="h-[180px] w-full" />
+            <Skeleton className="h-48" />
           ) : (
-            <ResponsiveContainer width="100%" height={180}>
-              <AreaChart data={daily} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+            <ResponsiveContainer width="100%" height={200}>
+              <AreaChart data={daily}>
                 <defs>
                   <linearGradient id="earn" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
@@ -269,12 +340,14 @@ export default function Dashboard() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 10 }} tickFormatter={d => d.slice(5)} />
-                <YAxis tick={{ fill: '#64748b', fontSize: 10 }} tickFormatter={v => `$${v}`} />
+                <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 11 }}
+                  tickFormatter={v => v.slice(5)} />
+                <YAxis tick={{ fill: '#64748b', fontSize: 11 }}
+                  tickFormatter={v => `$${v}`} />
                 <Tooltip
-                  contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8 }}
+                  contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }}
                   labelStyle={{ color: '#94a3b8' }}
-                  formatter={(v: unknown) => [`$${(v as number).toFixed(2)}`, 'Earnings']}
+                  formatter={(v: number) => [`$${v.toFixed(2)}`, 'Earnings']}
                 />
                 <Area type="monotone" dataKey="earnings" stroke="#6366f1" fill="url(#earn)" strokeWidth={2} />
               </AreaChart>
@@ -283,75 +356,26 @@ export default function Dashboard() {
         </div>
 
         <div className="card">
-          <h2 className="text-sm font-semibold text-slate-300 mb-4 flex items-center gap-2">
-            <Activity size={16} className="text-green-400" /> Tasks Completed — Last 14 Days
-          </h2>
+          <h2 className="text-sm font-semibold text-slate-300 mb-4">Tasks Completed — Last 14 Days</h2>
           {dailyLoading ? (
-            <Skeleton className="h-[180px] w-full" />
+            <Skeleton className="h-48" />
           ) : (
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={daily} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={daily}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 10 }} tickFormatter={d => d.slice(5)} />
-                <YAxis tick={{ fill: '#64748b', fontSize: 10 }} />
+                <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 11 }}
+                  tickFormatter={v => v.slice(5)} />
+                <YAxis tick={{ fill: '#64748b', fontSize: 11 }} allowDecimals={false} />
                 <Tooltip
-                  contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8 }}
+                  contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }}
                   labelStyle={{ color: '#94a3b8' }}
                 />
-                <Bar dataKey="tasks_completed" name="Tasks" fill="#22c55e" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="tasks_completed" fill="#22c55e" radius={[3, 3, 0, 0]} name="Completed" />
               </BarChart>
             </ResponsiveContainer>
           )}
         </div>
       </div>
-
-      {/* Sync Details — shown after a sync with results */}
-      {syncMutation.isSuccess && syncMutation.data && syncMutation.data.total > 0 && (
-        <div className="card space-y-3">
-          <h2 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
-            <RefreshCw size={14} className="text-brand-400" /> Last Sync Details
-          </h2>
-          <div className="divide-y divide-slate-800">
-            {syncMutation.data.results.map(r => (
-              <div key={r.website_id} className="py-3 flex items-start gap-3">
-                <div className={`mt-0.5 shrink-0 ${
-                  r.status === 'ok' ? 'text-green-400' :
-                  r.status === 'auth_required' ? 'text-yellow-400' : 'text-red-400'
-                }`}>
-                  {r.status === 'ok'
-                    ? <CheckCircle size={14} />
-                    : r.status === 'auth_required'
-                    ? <AlertTriangle size={14} />
-                    : <XCircle size={14} />
-                  }
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-slate-200 font-medium">{r.website_name}</p>
-                  {r.status === 'ok' && (
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      {r.page_title && <span className="mr-3">{r.page_title}</span>}
-                      {r.available_balance != null && (
-                        <span className="text-green-400 mr-3">Balance: ${r.available_balance.toFixed(2)}</span>
-                      )}
-                      {r.available_tasks != null && (
-                        <span className="text-blue-400">{r.available_tasks} tasks available</span>
-                      )}
-                    </p>
-                  )}
-                  {r.status === 'auth_required' && (
-                    <p className="text-xs text-yellow-500/80 mt-0.5">
-                      Login required — open the site in your browser and log in, then sync again
-                    </p>
-                  )}
-                  {r.status === 'error' && r.error_message && (
-                    <p className="text-xs text-red-400/80 mt-0.5">{r.error_message}</p>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Recent Activity */}
       <div className="card">

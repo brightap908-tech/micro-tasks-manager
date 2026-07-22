@@ -1,5 +1,5 @@
 import { clsx } from 'clsx'
-import type { TaskStatus, TaskCategory } from '../../api/client'
+import type { TaskStatus, TaskCategory } from '../../db/index'
 
 const statusStyles: Record<TaskStatus, string> = {
   pending:     'bg-slate-700 text-slate-300',

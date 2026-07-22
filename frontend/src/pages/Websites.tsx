@@ -1,69 +1,74 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Plus, Globe, ExternalLink, Trash2, Power,
-  Folder, FolderPlus, KeyRound, Eye, EyeOff, Copy,
+  Plus, Globe, Trash2, ExternalLink, ChevronDown,
+  KeyRound, Eye, EyeOff, Copy, Folder, RefreshCw,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { clsx } from 'clsx'
-import api from '../api/client'
-import type { Website, WebsiteFolder, Credential } from '../api/client'
+import {
+  getWebsites, createWebsite, updateWebsite, deleteWebsite,
+  getFolders, createFolder, deleteFolder,
+} from '../db/websites'
+import {
+  getCredentials, createCredential, deleteCredential, revealCredentialPassword,
+} from '../db/credentials'
+import { getLatestSnapshot, saveSnapshot } from '../db/snapshots'
+import { syncWebsite as syncWebsiteProxy } from '../api/client'
+import { logActivity } from '../db/activity'
+import type { Website, WebsiteFolder, StoredCredential } from '../db/index'
 import Modal from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import EmptyState from '../components/ui/EmptyState'
 
-const defaultSite = {
+const defaultWebsiteForm = {
   name: '', login_url: '', dashboard_url: '', description: '',
   plugin_id: 'generic', is_enabled: true, folder_id: '' as string | number,
+  favicon_url: '',
 }
 
 const defaultCred = { username: '', password: '', notes: '' }
 
-function SiteForm({
+function WebsiteForm({
   initial, folders, onSave, onCancel, loading,
 }: {
-  initial: typeof defaultSite
+  initial: typeof defaultWebsiteForm
   folders: WebsiteFolder[]
-  onSave: (d: typeof defaultSite) => void
+  onSave: (d: typeof defaultWebsiteForm) => void
   onCancel: () => void
   loading: boolean
 }) {
   const [form, setForm] = useState(initial)
   const set = (k: keyof typeof form, v: unknown) => setForm(p => ({ ...p, [k]: v }))
+
   return (
     <form onSubmit={e => { e.preventDefault(); onSave(form) }} className="space-y-4">
       <div>
-        <label className="label">Website Name *</label>
-        <input className="input" required value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. PicoWorkers" />
+        <label className="label">Name *</label>
+        <input className="input" required value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Appen" />
       </div>
       <div>
         <label className="label">Login URL *</label>
-        <input className="input" required value={form.login_url} onChange={e => set('login_url', e.target.value)} placeholder="https://example.com/login" />
+        <input className="input" required type="url" value={form.login_url} onChange={e => set('login_url', e.target.value)} placeholder="https://..." />
       </div>
       <div>
         <label className="label">Dashboard URL</label>
-        <input className="input" value={form.dashboard_url} onChange={e => set('dashboard_url', e.target.value)} placeholder="https://example.com/dashboard" />
+        <input className="input" type="url" value={form.dashboard_url} onChange={e => set('dashboard_url', e.target.value)} placeholder="https://... (for sync)" />
       </div>
       <div>
         <label className="label">Description</label>
-        <textarea className="input" rows={2} value={form.description} onChange={e => set('description', e.target.value)} placeholder="Optional notes about this website" />
+        <input className="input" value={form.description} onChange={e => set('description', e.target.value)} placeholder="Optional" />
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <label className="label">Folder</label>
-          <select className="select" value={form.folder_id} onChange={e => set('folder_id', e.target.value ? parseInt(e.target.value) : '')}>
-            <option value="">No folder</option>
-            {folders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="label">Plugin</label>
-          <input className="input" value={form.plugin_id} onChange={e => set('plugin_id', e.target.value)} placeholder="generic" />
-        </div>
+      <div>
+        <label className="label">Folder</label>
+        <select className="select" value={form.folder_id} onChange={e => set('folder_id', e.target.value ? parseInt(e.target.value) : '')}>
+          <option value="">No folder</option>
+          {folders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+        </select>
       </div>
       <div className="flex items-center gap-2">
         <input type="checkbox" id="enabled" checked={form.is_enabled} onChange={e => set('is_enabled', e.target.checked)} className="rounded" />
-        <label htmlFor="enabled" className="text-sm text-slate-300 cursor-pointer">Enabled</label>
+        <label htmlFor="enabled" className="text-sm text-slate-300 cursor-pointer">Enabled (include in sync)</label>
       </div>
       <div className="flex justify-end gap-3 pt-2">
         <button type="button" className="btn-secondary" onClick={onCancel}>Cancel</button>
@@ -80,13 +85,14 @@ function CredentialPanel({ websiteId, websiteName }: { websiteId: number; websit
   const [revealed, setRevealed] = useState<Record<number, string>>({})
   const [loadingReveal, setLoadingReveal] = useState<number | null>(null)
 
-  const { data: creds = [] } = useQuery<Credential[]>({
+  const { data: creds = [] } = useQuery<StoredCredential[]>({
     queryKey: ['credentials', websiteId],
-    queryFn: () => api.get(`/credentials?website_id=${websiteId}`).then(r => r.data),
+    queryFn: () => getCredentials(websiteId),
   })
 
   const create = useMutation({
-    mutationFn: (d: typeof defaultCred) => api.post('/credentials', { ...d, website_id: websiteId }),
+    mutationFn: (d: typeof defaultCred) =>
+      createCredential({ website_id: websiteId, ...d }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['credentials', websiteId] })
       setForm(defaultCred)
@@ -96,18 +102,23 @@ function CredentialPanel({ websiteId, websiteName }: { websiteId: number; websit
   })
 
   const deleteCred = useMutation({
-    mutationFn: (id: number) => api.delete(`/credentials/${id}`),
+    mutationFn: (id: number) => deleteCredential(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['credentials', websiteId] }),
   })
 
   const revealPassword = async (credId: number) => {
-    if (revealed[credId]) { setRevealed(p => { const n = { ...p }; delete n[credId]; return n }); return }
+    if (revealed[credId] !== undefined) {
+      setRevealed(p => { const n = { ...p }; delete n[credId]; return n })
+      return
+    }
     setLoadingReveal(credId)
     try {
-      const { data } = await api.get(`/credentials/${credId}/reveal`)
-      setRevealed(p => ({ ...p, [credId]: data.password }))
-    } catch { toast.error('Failed to reveal password') }
-    finally { setLoadingReveal(null) }
+      const pw = await revealCredentialPassword(credId)
+      setRevealed(p => ({ ...p, [credId]: pw }))
+    } catch (e) {
+      toast.error(`Failed to reveal: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setLoadingReveal(null) }
   }
 
   const copyToClipboard = (text: string, label: string) => {
@@ -146,285 +157,350 @@ function CredentialPanel({ websiteId, websiteName }: { websiteId: number; websit
       )}
 
       {creds.map(c => (
-        <div key={c.id} className="bg-slate-800/40 rounded-lg p-3 border border-slate-800 space-y-1.5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="text-xs text-slate-300 font-medium truncate">{c.username}</span>
-              <button className="p-0.5 text-slate-600 hover:text-slate-400 touch-manipulation shrink-0" onClick={() => copyToClipboard(c.username, 'Username')}>
+        <div key={c.id} className="bg-slate-800/40 rounded-lg px-3 py-2.5 space-y-1.5">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-300 font-medium flex-1 truncate">{c.username}</span>
+            <button
+              onClick={() => copyToClipboard(c.username, 'Username')}
+              className="p-1 text-slate-500 hover:text-slate-300 transition-colors"
+              title="Copy username"
+            >
+              <Copy size={11} />
+            </button>
+            <button
+              onClick={() => revealPassword(c.id)}
+              className="p-1 text-slate-500 hover:text-slate-300 transition-colors"
+              title={revealed[c.id] !== undefined ? 'Hide' : 'Reveal'}
+              disabled={loadingReveal === c.id}
+            >
+              {revealed[c.id] !== undefined ? <EyeOff size={11} /> : <Eye size={11} />}
+            </button>
+            <button
+              onClick={() => deleteCred.mutate(c.id)}
+              className="p-1 text-slate-500 hover:text-red-400 transition-colors"
+              title="Delete credential"
+            >
+              <Trash2 size={11} />
+            </button>
+          </div>
+          {revealed[c.id] !== undefined && (
+            <div className="flex items-center gap-2">
+              <code className="text-xs text-yellow-300 bg-slate-900 px-2 py-1 rounded flex-1 truncate">
+                {revealed[c.id]}
+              </code>
+              <button
+                onClick={() => copyToClipboard(revealed[c.id], 'Password')}
+                className="p-1 text-slate-500 hover:text-slate-300 transition-colors"
+                title="Copy password"
+              >
                 <Copy size={11} />
               </button>
             </div>
-            <button className="p-1 text-slate-600 hover:text-red-400 transition-colors touch-manipulation shrink-0" onClick={() => deleteCred.mutate(c.id)}>
-              <Trash2 size={12} />
-            </button>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500 font-mono">
-              {revealed[c.id] ? revealed[c.id] : '••••••••'}
-            </span>
-            {revealed[c.id] && (
-              <button className="p-0.5 text-slate-600 hover:text-slate-400 touch-manipulation" onClick={() => copyToClipboard(revealed[c.id], 'Password')}>
-                <Copy size={11} />
-              </button>
-            )}
-            <button
-              className="ml-auto p-0.5 text-slate-600 hover:text-slate-400 touch-manipulation"
-              onClick={() => revealPassword(c.id)}
-              disabled={loadingReveal === c.id}
-            >
-              {revealed[c.id] ? <EyeOff size={12} /> : <Eye size={12} />}
-            </button>
-          </div>
-          {c.notes && <p className="text-xs text-slate-600">{c.notes}</p>}
-          {c.last_used && (
-            <p className="text-xs text-slate-700">
-              Last used: {new Date(c.last_used).toLocaleDateString()}
-            </p>
           )}
+          {c.notes && <p className="text-xs text-slate-600">{c.notes}</p>}
         </div>
       ))}
     </div>
   )
 }
 
-function WebsiteCard({
-  website, onEdit, onDelete, onToggle,
-}: {
-  website: Website
-  onEdit: () => void
-  onDelete: () => void
-  onToggle: () => void
-}) {
-  const [showCreds, setShowCreds] = useState(false)
-
-  const openUrl = (url: string) => {
-    window.open(url, '_blank', 'noopener,noreferrer')
-  }
-
-  return (
-    <div className={clsx('card space-y-3 transition-opacity', !website.is_enabled && 'opacity-60')}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-9 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
-            <Globe size={16} className="text-slate-400" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-slate-100 truncate">{website.name}</p>
-            <p className="text-xs text-slate-500 truncate">{website.login_url}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-1 shrink-0">
-          <button
-            className={clsx('p-1.5 rounded-lg transition-colors touch-manipulation', website.is_enabled
-              ? 'text-green-400 hover:bg-green-500/10'
-              : 'text-slate-600 hover:bg-slate-700'
-            )}
-            title={website.is_enabled ? 'Disable' : 'Enable'}
-            onClick={onToggle}
-          >
-            <Power size={14} />
-          </button>
-          <button className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-700 transition-colors touch-manipulation" onClick={onEdit}>✏️</button>
-          <button className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors touch-manipulation" onClick={onDelete}>
-            <Trash2 size={14} />
-          </button>
-        </div>
-      </div>
-
-      {website.description && (
-        <p className="text-xs text-slate-500">{website.description}</p>
-      )}
-
-      {/* Stats */}
-      <div className="flex flex-wrap gap-3 text-xs text-slate-500">
-        <span>{website.task_count ?? 0} tasks</span>
-        <span>{website.completed_tasks ?? 0} completed</span>
-        {(website.total_earnings ?? 0) > 0 && (
-          <span className="text-green-400">${(website.total_earnings ?? 0).toFixed(2)} earned</span>
-        )}
-      </div>
-
-      {/* Actions */}
-      <div className="flex gap-2 flex-wrap">
-        <button
-          className="btn-secondary text-xs py-1.5 px-3"
-          onClick={() => openUrl(website.login_url)}
-        >
-          <ExternalLink size={12} /> Login
-        </button>
-        {website.dashboard_url && (
-          <button
-            className="btn-secondary text-xs py-1.5 px-3"
-            onClick={() => openUrl(website.dashboard_url!)}
-          >
-            <ExternalLink size={12} /> Dashboard
-          </button>
-        )}
-        <button
-          className={clsx(
-            'text-xs py-1.5 px-3 flex items-center gap-1.5 rounded-lg border transition-colors touch-manipulation',
-            showCreds
-              ? 'bg-brand-600/20 text-brand-400 border-brand-700/50'
-              : 'btn-secondary',
-          )}
-          onClick={() => setShowCreds(p => !p)}
-        >
-          <KeyRound size={12} /> Credentials
-        </button>
-      </div>
-
-      {showCreds && (
-        <div className="border-t border-slate-800 pt-3">
-          <CredentialPanel websiteId={website.id} websiteName={website.name} />
-        </div>
-      )}
-    </div>
-  )
-}
-
 export default function WebsitesPage() {
   const qc = useQueryClient()
-  const [showSite, setShowSite] = useState(false)
+  const [showModal, setShowModal] = useState(false)
   const [editSite, setEditSite] = useState<Website | null>(null)
-  const [deleteSiteId, setDeleteSiteId] = useState<number | null>(null)
-  const [showFolder, setShowFolder] = useState(false)
+  const [deleteId, setDeleteId] = useState<number | null>(null)
+  const [expandedId, setExpandedId] = useState<number | null>(null)
+  const [syncingId, setSyncingId] = useState<number | null>(null)
+  const [showFolderModal, setShowFolderModal] = useState(false)
   const [folderName, setFolderName] = useState('')
-  const [activeFolder, setActiveFolder] = useState<number | 'all'>('all')
 
-  const { data: websites = [] } = useQuery<Website[]>({
+  const { data: websites = [] } = useQuery({
     queryKey: ['websites'],
-    queryFn: () => api.get('/websites').then(r => r.data),
+    queryFn: getWebsites,
   })
 
-  const { data: folders = [] } = useQuery<WebsiteFolder[]>({
+  const { data: folders = [] } = useQuery({
     queryKey: ['folders'],
-    queryFn: () => api.get('/websites/folders').then(r => r.data),
+    queryFn: getFolders,
   })
 
-  const createSite = useMutation({
-    mutationFn: (d: typeof defaultSite) => api.post('/websites', {
-      ...d, folder_id: d.folder_id || null, dashboard_url: d.dashboard_url || null,
+  const folderMap = Object.fromEntries(folders.map(f => [f.id, f]))
+
+  const create = useMutation({
+    mutationFn: (d: typeof defaultWebsiteForm) => createWebsite({
+      name: d.name,
+      login_url: d.login_url,
+      dashboard_url: d.dashboard_url || undefined,
+      description: d.description || undefined,
+      plugin_id: d.plugin_id,
+      is_enabled: d.is_enabled,
+      folder_id: d.folder_id ? Number(d.folder_id) : undefined,
+      favicon_url: d.favicon_url || undefined,
     }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['websites'] }); setShowSite(false); toast.success('Website added') },
+    onSuccess: (site) => {
+      qc.invalidateQueries({ queryKey: ['websites'] })
+      setShowModal(false)
+      toast.success('Website added')
+      logActivity(`Website added: ${site.name}`, site.login_url, 'website', site.id)
+    },
+    onError: (e) => toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`),
   })
 
-  const updateSite = useMutation({
-    mutationFn: ({ id, d }: { id: number; d: typeof defaultSite }) => api.put(`/websites/${id}`, {
-      ...d, folder_id: d.folder_id || null, dashboard_url: d.dashboard_url || null,
-    }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['websites'] }); setEditSite(null); toast.success('Website updated') },
+  const update = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: typeof defaultWebsiteForm }) =>
+      updateWebsite(id, {
+        name: data.name,
+        login_url: data.login_url,
+        dashboard_url: data.dashboard_url || undefined,
+        description: data.description || undefined,
+        plugin_id: data.plugin_id,
+        is_enabled: data.is_enabled,
+        folder_id: data.folder_id ? Number(data.folder_id) : undefined,
+        favicon_url: data.favicon_url || undefined,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['websites'] })
+      setEditSite(null)
+      toast.success('Website updated')
+    },
   })
 
-  const deleteSite = useMutation({
-    mutationFn: (id: number) => api.delete(`/websites/${id}`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['websites'] }); setDeleteSiteId(null); toast.success('Website deleted') },
+  const deleteMut = useMutation({
+    mutationFn: (id: number) => deleteWebsite(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['websites'] })
+      setDeleteId(null)
+      toast.success('Website deleted')
+    },
   })
 
-  const toggleSite = useMutation({
-    mutationFn: (id: number) => api.post(`/websites/${id}/toggle`),
+  const toggleEnabled = useMutation({
+    mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) =>
+      updateWebsite(id, { is_enabled: enabled }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['websites'] }),
   })
 
-  const createFolder = useMutation({
-    mutationFn: (name: string) => api.post('/websites/folders', { name }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['folders'] }); setShowFolder(false); setFolderName(''); toast.success('Folder created') },
+  const createFolderMut = useMutation({
+    mutationFn: () => createFolder({ name: folderName, color: '#6366f1' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['folders'] })
+      setShowFolderModal(false)
+      setFolderName('')
+      toast.success('Folder created')
+    },
   })
 
-  const deleteFolder = useMutation({
-    mutationFn: (id: number) => api.delete(`/websites/folders/${id}`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['folders'] }); qc.invalidateQueries({ queryKey: ['websites'] }) },
-  })
+  const syncOne = async (site: Website) => {
+    const url = site.dashboard_url || site.login_url
+    setSyncingId(site.id)
+    try {
+      const result = await syncWebsiteProxy(url, site.name)
+      await saveSnapshot({
+        website_id: site.id,
+        status: result.status,
+        available_balance: result.available_balance ?? undefined,
+        available_tasks: result.available_tasks ?? undefined,
+        page_title: result.page_title ?? undefined,
+        error_message: result.error_message ?? undefined,
+      })
+      qc.invalidateQueries({ queryKey: ['sync-status'] })
+      qc.invalidateQueries({ queryKey: ['snapshots', site.id] })
 
-  const filtered = activeFolder === 'all'
-    ? websites
-    : websites.filter(w => w.folder_id === activeFolder)
+      if (result.status === 'ok') {
+        toast.success(`${site.name}: synced`)
+      } else if (result.status === 'auth_required') {
+        toast(`${site.name}: login required — open the site and log in first`, { icon: '🔐', duration: 5000 })
+      } else {
+        toast.error(`${site.name}: ${result.error_message ?? 'sync failed'}`, { duration: 6000 })
+        if (result.error_detail) console.error(`[Sync] ${site.name}:\n${result.error_detail}`)
+      }
+    } catch (e) {
+      toast.error(`${site.name}: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setSyncingId(null)
+    }
+  }
+
+  const SyncStatus = ({ siteId }: { siteId: number }) => {
+    const { data: snap } = useQuery({
+      queryKey: ['snapshots', siteId],
+      queryFn: () => getLatestSnapshot(siteId),
+    })
+    if (!snap) return <span className="text-xs text-slate-600">Never synced</span>
+    if (snap.status === 'ok') return (
+      <span className="text-xs text-green-400">
+        {snap.available_balance !== undefined ? `$${snap.available_balance.toFixed(2)}` : '✓ synced'}
+        {snap.available_tasks !== undefined && ` · ${snap.available_tasks} tasks`}
+      </span>
+    )
+    if (snap.status === 'auth_required') return <span className="text-xs text-yellow-400">Login required</span>
+    return (
+      <span className="text-xs text-red-400" title={snap.error_message ?? ''}>
+        Error: {(snap.error_message ?? 'sync failed').slice(0, 40)}
+      </span>
+    )
+  }
 
   return (
-    <div className="space-y-5 sm:space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+    <div className="space-y-5">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="hidden sm:block text-2xl font-bold text-slate-100">Websites</h1>
           <p className="text-sm text-slate-500">
-            {websites.length} sites · {websites.filter(w => w.is_enabled).length} active
+            {websites.length} site{websites.length !== 1 ? 's' : ''}
+            {' · '}{websites.filter(w => w.is_enabled).length} enabled
           </p>
         </div>
-        <div className="flex gap-2 ml-auto sm:ml-0">
-          <button className="btn-secondary" onClick={() => setShowFolder(true)}>
-            <FolderPlus size={15} /> <span className="hidden xs:inline">New Folder</span>
+        <div className="flex gap-2 self-start sm:self-auto">
+          <button className="btn-secondary" onClick={() => setShowFolderModal(true)}>
+            <Folder size={15} /> Folder
           </button>
-          <button className="btn-primary" onClick={() => setShowSite(true)}>
-            <Plus size={15} /> Add Website
+          <button className="btn-primary" onClick={() => setShowModal(true)}>
+            <Plus size={15} /> Add Site
           </button>
         </div>
       </div>
 
-      {/* Folder tabs — scrollable row on mobile */}
-      {folders.length > 0 && (
-        <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap scrollbar-hide">
-          <button
-            className={clsx('badge px-3 py-1.5 text-sm cursor-pointer transition-colors shrink-0', activeFolder === 'all' ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200')}
-            onClick={() => setActiveFolder('all')}
-          >
-            All ({websites.length})
-          </button>
-          {folders.map(f => (
-            <div key={f.id} className="flex items-center gap-1 shrink-0">
-              <button
-                className={clsx('badge px-3 py-1.5 text-sm cursor-pointer transition-colors', activeFolder === f.id ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200')}
-                onClick={() => setActiveFolder(f.id)}
-                style={activeFolder === f.id ? {} : { borderLeft: `3px solid ${f.color}` }}
-              >
-                <Folder size={12} className="mr-1" />
-                {f.name} ({websites.filter(w => w.folder_id === f.id).length})
-              </button>
-              <button className="text-slate-600 hover:text-red-400 transition-colors p-0.5 touch-manipulation" onClick={() => deleteFolder.mutate(f.id)}>×</button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Grid — 1 col on mobile, 2 on sm, 3 on lg */}
-      {filtered.length === 0 ? (
+      {websites.length === 0 ? (
         <EmptyState
-          icon={<Globe size={24} />}
+          icon={<Globe size={32} />}
           title="No websites added"
-          description="Add microtask websites to manage them from one place."
+          description="Add the microtask websites you work on to start tracking tasks and syncing data."
           action={
-            <button className="btn-primary" onClick={() => setShowSite(true)}>
+            <button className="btn-primary" onClick={() => setShowModal(true)}>
               <Plus size={15} /> Add Website
             </button>
           }
         />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map(w => (
-            <WebsiteCard
-              key={w.id}
-              website={w}
-              onEdit={() => setEditSite(w)}
-              onDelete={() => setDeleteSiteId(w.id)}
-              onToggle={() => toggleSite.mutate(w.id)}
-            />
-          ))}
+        <div className="space-y-2">
+          {websites.map(site => {
+            const isExpanded = expandedId === site.id
+            const folder = site.folder_id ? folderMap[site.folder_id] : undefined
+
+            return (
+              <div key={site.id} className="card hover:border-slate-700 transition-colors">
+                <div
+                  className="flex items-center gap-3 cursor-pointer"
+                  onClick={() => setExpandedId(isExpanded ? null : site.id)}
+                >
+                  <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center shrink-0">
+                    {site.favicon_url ? (
+                      <img src={site.favicon_url} alt="" className="w-5 h-5 object-contain" onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                    ) : (
+                      <Globe size={16} className="text-slate-500" />
+                    )}
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium text-slate-100">{site.name}</span>
+                      {folder && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-slate-800 text-slate-400"
+                          style={{ borderLeft: `3px solid ${folder.color}` }}>
+                          {folder.name}
+                        </span>
+                      )}
+                      <span className={clsx(
+                        'text-xs px-1.5 py-0.5 rounded',
+                        site.is_enabled ? 'bg-green-500/10 text-green-400' : 'bg-slate-800 text-slate-500',
+                      )}>
+                        {site.is_enabled ? 'enabled' : 'disabled'}
+                      </span>
+                    </div>
+                    <SyncStatus siteId={site.id} />
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+                    <button
+                      className="p-1.5 rounded-lg text-slate-500 hover:text-brand-400 hover:bg-brand-500/10 transition-colors"
+                      onClick={() => syncOne(site)}
+                      disabled={syncingId === site.id}
+                      title="Sync now"
+                    >
+                      <RefreshCw size={14} className={syncingId === site.id ? 'animate-spin' : ''} />
+                    </button>
+                    <a
+                      href={site.login_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800 transition-colors"
+                      title="Open site"
+                    >
+                      <ExternalLink size={14} />
+                    </a>
+                    <ChevronDown
+                      size={14}
+                      className={clsx('text-slate-500 transition-transform ml-1', isExpanded && 'rotate-180')}
+                    />
+                  </div>
+                </div>
+
+                {isExpanded && (
+                  <div className="mt-4 pt-4 border-t border-slate-800 space-y-4">
+                    {site.description && (
+                      <p className="text-sm text-slate-400">{site.description}</p>
+                    )}
+
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      <a href={site.login_url} target="_blank" rel="noopener noreferrer"
+                        className="text-brand-400 hover:text-brand-300 flex items-center gap-1">
+                        <ExternalLink size={11} /> Login page
+                      </a>
+                      {site.dashboard_url && (
+                        <a href={site.dashboard_url} target="_blank" rel="noopener noreferrer"
+                          className="text-brand-400 hover:text-brand-300 flex items-center gap-1">
+                          <ExternalLink size={11} /> Dashboard
+                        </a>
+                      )}
+                    </div>
+
+                    {/* Credentials */}
+                    <CredentialPanel websiteId={site.id} websiteName={site.name} />
+
+                    {/* Actions */}
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        className="btn-secondary text-xs py-1 px-2"
+                        onClick={() => toggleEnabled.mutate({ id: site.id, enabled: !site.is_enabled })}
+                      >
+                        {site.is_enabled ? 'Disable' : 'Enable'}
+                      </button>
+                      <button
+                        className="btn-secondary text-xs py-1 px-2"
+                        onClick={() => setEditSite(site)}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        className="btn-secondary text-xs py-1 px-2 text-red-400 hover:text-red-300 ml-auto"
+                        onClick={() => setDeleteId(site.id)}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
 
-      {/* Add site modal */}
-      <Modal open={showSite} onClose={() => setShowSite(false)} title="Add Website" size="md">
-        <SiteForm
-          initial={defaultSite}
+      {/* Add/edit website modals */}
+      <Modal open={showModal} onClose={() => setShowModal(false)} title="Add Website" size="lg">
+        <WebsiteForm
+          initial={defaultWebsiteForm}
           folders={folders}
-          onSave={d => createSite.mutate(d)}
-          onCancel={() => setShowSite(false)}
-          loading={createSite.isPending}
+          onSave={d => create.mutate(d)}
+          onCancel={() => setShowModal(false)}
+          loading={create.isPending}
         />
       </Modal>
 
-      {/* Edit site modal */}
       {editSite && (
-        <Modal open={!!editSite} onClose={() => setEditSite(null)} title="Edit Website" size="md">
-          <SiteForm
+        <Modal open={!!editSite} onClose={() => setEditSite(null)} title="Edit Website" size="lg">
+          <WebsiteForm
             initial={{
               name: editSite.name,
               login_url: editSite.login_url,
@@ -433,40 +509,40 @@ export default function WebsitesPage() {
               plugin_id: editSite.plugin_id,
               is_enabled: editSite.is_enabled,
               folder_id: editSite.folder_id ?? '',
+              favicon_url: editSite.favicon_url ?? '',
             }}
             folders={folders}
-            onSave={d => updateSite.mutate({ id: editSite.id, d })}
+            onSave={d => update.mutate({ id: editSite.id, data: d })}
             onCancel={() => setEditSite(null)}
-            loading={updateSite.isPending}
+            loading={update.isPending}
           />
         </Modal>
       )}
 
-      {/* Delete confirm */}
-      <ConfirmDialog
-        open={deleteSiteId !== null}
-        onClose={() => setDeleteSiteId(null)}
-        onConfirm={() => deleteSiteId !== null && deleteSite.mutate(deleteSiteId)}
-        title="Delete Website"
-        message="Delete this website? Associated credentials will also be deleted. Tasks will remain."
-        confirmLabel="Delete"
-        danger
-        loading={deleteSite.isPending}
-      />
-
-      {/* New folder modal */}
-      <Modal open={showFolder} onClose={() => setShowFolder(false)} title="New Folder" size="sm">
-        <form onSubmit={e => { e.preventDefault(); createFolder.mutate(folderName) }} className="space-y-4">
+      {/* Folder modal */}
+      <Modal open={showFolderModal} onClose={() => setShowFolderModal(false)} title="Create Folder">
+        <form onSubmit={e => { e.preventDefault(); createFolderMut.mutate() }} className="space-y-4">
           <div>
-            <label className="label">Folder Name</label>
-            <input className="input" required value={folderName} onChange={e => setFolderName(e.target.value)} placeholder="e.g. Social Media" />
+            <label className="label">Folder name *</label>
+            <input className="input" required value={folderName} onChange={e => setFolderName(e.target.value)} placeholder="e.g. Social Tasks" />
           </div>
           <div className="flex justify-end gap-3">
-            <button type="button" className="btn-secondary" onClick={() => setShowFolder(false)}>Cancel</button>
-            <button type="submit" className="btn-primary" disabled={createFolder.isPending}>Create</button>
+            <button type="button" className="btn-secondary" onClick={() => setShowFolderModal(false)}>Cancel</button>
+            <button type="submit" className="btn-primary" disabled={createFolderMut.isPending}>Create</button>
           </div>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        open={deleteId !== null}
+        onClose={() => setDeleteId(null)}
+        onConfirm={() => deleteId !== null && deleteMut.mutate(deleteId)}
+        title="Delete Website"
+        message="This will also delete all saved credentials for this site. Tasks linked to it will remain but will be unlinked."
+        confirmLabel="Delete"
+        danger
+        loading={deleteMut.isPending}
+      />
     </div>
   )
 }
