@@ -4,9 +4,10 @@ __pycache__/
 *.pyo
 .pythonlibs/
 *.egg-info/
-dist/
 build/
 *.egg
+# Ignore Python dist/ at repo root only, NOT frontend/dist
+/dist/
 
 # Secrets & database
 .encryption.key
