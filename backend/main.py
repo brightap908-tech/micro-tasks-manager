@@ -12,10 +12,18 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from backend.database import engine, Base
 from backend.routers import websites, credentials, tasks, reports, notifications, settings, browser
+
+# Absolute path to the pre-built React frontend — resolved at import time so
+# it never changes regardless of the working directory uvicorn is started from.
+FRONTEND_DIST = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+)
+_INDEX_HTML = os.path.join(FRONTEND_DIST, "index.html")
+_ASSETS_DIR = os.path.join(FRONTEND_DIST, "assets")
 
 
 @asynccontextmanager
@@ -41,7 +49,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register all routers
+# ── API routers ────────────────────────────────────────────────────────────────
 app.include_router(websites.router)
 app.include_router(credentials.router)
 app.include_router(tasks.router)
@@ -56,16 +64,40 @@ def health():
     return {"status": "ok", "service": "Microtask Manager"}
 
 
-# ─── Serve React frontend in production ───────────────────────────────────────
-FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+# ── Static assets (JS/CSS bundles) ────────────────────────────────────────────
+# Mount /assets only when the directory is present (build succeeded).
+# Checked once at startup; Render always runs the build step before starting.
+if os.path.isdir(_ASSETS_DIR):
+    app.mount("/assets", StaticFiles(directory=_ASSETS_DIR), name="assets")
 
-if os.path.exists(FRONTEND_DIST):
-    app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIST, "assets")), name="assets")
 
-    @app.get("/{full_path:path}", include_in_schema=False)
-    def serve_frontend(full_path: str):
-        index = os.path.join(FRONTEND_DIST, "index.html")
-        return FileResponse(index)
+# ── Favicon ───────────────────────────────────────────────────────────────────
+@app.get("/favicon.svg", include_in_schema=False)
+def favicon():
+    path = os.path.join(FRONTEND_DIST, "favicon.svg")
+    if os.path.isfile(path):
+        return FileResponse(path, media_type="image/svg+xml")
+    return JSONResponse(status_code=404, content={"detail": "Not found"})
+
+
+# ── SPA catch-all — ALWAYS registered, existence checked per-request ──────────
+# This must come last so it doesn't shadow any API route.
+# Matches "/" (full_path="") and every client-side route like "/tasks", "/reports".
+@app.get("/{full_path:path}", include_in_schema=False)
+def serve_frontend(full_path: str):
+    if os.path.isfile(_INDEX_HTML):
+        return FileResponse(_INDEX_HTML, media_type="text/html")
+    # Frontend was not built — return a helpful JSON response instead of 404
+    return JSONResponse(
+        status_code=200,
+        content={
+            "service": "Microtask Manager API",
+            "status": "running",
+            "note": "Frontend not built. Run: cd frontend && npm run build",
+            "docs": "/docs",
+            "health": "/api/health",
+        },
+    )
 
 
 if __name__ == "__main__":
