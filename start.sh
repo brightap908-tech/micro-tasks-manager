@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Production start script — starts the FastAPI backend.
-# The frontend is pre-built during the Render build phase (npm run build).
+# Production start script — the frontend is pre-built and committed to git,
+# so no npm step is needed here. Render only needs Python.
 set -e
 
 echo "▶ Starting Microtask Manager..."

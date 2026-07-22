@@ -16,8 +16,9 @@ backups/
 # Node
 node_modules/
 package-lock.json
-frontend/dist/
 frontend/package-lock.json
+# frontend/dist is intentionally committed so Render (Python runtime)
+# does not need Node.js during deployment — dist is pre-built and pushed.
 
 # Env
 .env
