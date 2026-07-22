@@ -68,6 +68,9 @@ class Website(Base):
     folder = relationship("WebsiteFolder", back_populates="websites")
     credentials = relationship("Credential", back_populates="website", cascade="all, delete-orphan")
     tasks = relationship("Task", back_populates="website")
+    snapshots = relationship("WebsiteSnapshot", back_populates="website",
+                             cascade="all, delete-orphan",
+                             order_by="WebsiteSnapshot.synced_at.desc()")
 
 
 class Credential(Base):
@@ -143,3 +146,22 @@ class ActivityLog(Base):
     entity_type = Column(String(50), nullable=True)  # task, website, credential
     entity_id = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class WebsiteSnapshot(Base):
+    """Stores the result of each sync attempt for a website."""
+    __tablename__ = "website_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    website_id = Column(Integer, ForeignKey("websites.id", ondelete="CASCADE"), nullable=False)
+    synced_at = Column(DateTime(timezone=True), server_default=func.now())
+    # ok | auth_required | error
+    status = Column(String(50), default="ok", nullable=False)
+    error_message = Column(Text, nullable=True)
+    # Extracted data (best-effort from the page)
+    available_balance = Column(Float, nullable=True)
+    available_tasks = Column(Integer, nullable=True)
+    page_title = Column(String(500), nullable=True)
+    raw_extract = Column(Text, nullable=True)  # JSON blob of extracted numbers
+
+    website = relationship("Website", back_populates="snapshots")

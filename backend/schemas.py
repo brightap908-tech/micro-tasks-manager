@@ -179,6 +179,10 @@ class DashboardStats(BaseModel):
     active_websites: int
     time_spent_today_seconds: int
     time_spent_week_seconds: int
+    # Sync-enriched fields
+    available_balance: float = 0.0
+    last_sync_at: Optional[datetime] = None
+    sync_status: str = "never"  # never | ok | partial | error
 
 class EarningsByWebsite(BaseModel):
     website_id: int
@@ -208,6 +212,26 @@ class ActivityLog(BaseModel):
     created_at: datetime
     class Config:
         from_attributes = True
+
+
+# ─── Sync ─────────────────────────────────────────────────────────────────────
+
+class WebsiteSyncResult(BaseModel):
+    website_id: int
+    website_name: str
+    status: str            # ok | auth_required | error
+    available_balance: Optional[float] = None
+    available_tasks: Optional[int] = None
+    page_title: Optional[str] = None
+    error_message: Optional[str] = None
+    synced_at: datetime
+    class Config:
+        from_attributes = True
+
+class SyncAllResult(BaseModel):
+    total: int
+    succeeded: int
+    results: List[WebsiteSyncResult]
 
 
 # ─── Browser / Navigation ─────────────────────────────────────────────────────

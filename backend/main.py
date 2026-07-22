@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 
 from backend.database import engine, Base
-from backend.routers import websites, credentials, tasks, reports, notifications, settings, browser
+from backend.routers import websites, credentials, tasks, reports, notifications, settings, browser, sync
 
 # Absolute path to the pre-built React frontend — resolved at import time so
 # it never changes regardless of the working directory uvicorn is started from.
@@ -57,6 +57,7 @@ app.include_router(reports.router)
 app.include_router(notifications.router)
 app.include_router(settings.router)
 app.include_router(browser.router)
+app.include_router(sync.router)
 
 
 @app.get("/api/health")

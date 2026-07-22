@@ -87,6 +87,27 @@ export interface DashboardStats {
   active_websites: number
   time_spent_today_seconds: number
   time_spent_week_seconds: number
+  // Sync-enriched fields
+  available_balance: number
+  last_sync_at: string | null
+  sync_status: 'never' | 'ok' | 'partial' | 'error'
+}
+
+export interface WebsiteSyncResult {
+  website_id: number
+  website_name: string
+  status: 'ok' | 'auth_required' | 'error'
+  available_balance: number | null
+  available_tasks: number | null
+  page_title: string | null
+  error_message: string | null
+  synced_at: string
+}
+
+export interface SyncAllResult {
+  total: number
+  succeeded: number
+  results: WebsiteSyncResult[]
 }
 
 export interface DailyStats {

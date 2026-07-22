@@ -49,6 +49,39 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     ]
 
     websites = db.query(models.Website).all()
+    website_ids = [w.id for w in websites]
+
+    # ── Sync snapshot enrichment ───────────────────────────────────────────────
+    available_balance = 0.0
+    last_sync_at = None
+    sync_status = "never"
+
+    if website_ids:
+        # Fetch the most-recent snapshot for every website in one query
+        all_snaps = (
+            db.query(models.WebsiteSnapshot)
+            .filter(models.WebsiteSnapshot.website_id.in_(website_ids))
+            .order_by(models.WebsiteSnapshot.synced_at.desc())
+            .all()
+        )
+        seen: set = set()
+        latest_snaps = []
+        for s in all_snaps:
+            if s.website_id not in seen:
+                seen.add(s.website_id)
+                latest_snaps.append(s)
+
+        if latest_snaps:
+            available_balance = sum(s.available_balance or 0.0 for s in latest_snaps)
+            last_sync_at = max(s.synced_at for s in latest_snaps)
+            statuses = {s.status for s in latest_snaps}
+            if statuses == {"ok"}:
+                sync_status = "ok"
+            elif "ok" in statuses:
+                sync_status = "partial"
+            else:
+                sync_status = "error"
+    # ── End sync enrichment ───────────────────────────────────────────────────
 
     return schemas.DashboardStats(
         total_earnings=sum(t.reward for t in completed),
@@ -60,6 +93,9 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         active_websites=sum(1 for w in websites if w.is_enabled),
         time_spent_today_seconds=sum(t.time_spent_seconds for t in today_tasks),
         time_spent_week_seconds=sum(t.time_spent_seconds for t in week_tasks),
+        available_balance=available_balance,
+        last_sync_at=last_sync_at,
+        sync_status=sync_status,
     )
 
 
