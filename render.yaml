@@ -8,18 +8,37 @@ services:
   - type: web
     name: microtask-manager
     runtime: python
-    buildCommand: pip install -r requirements.txt && cd frontend && npm install && npm run build
+    # Build order:
+    #  1. Python packages (includes the `playwright` Python package)
+    #  2. Download Chromium binary + system-level OS deps (libglib, libnss, …)
+    #  3. Build the React frontend
+    buildCommand: >-
+      pip install -r requirements.txt &&
+      python -m playwright install --with-deps chromium &&
+      cd frontend && npm install && npm run build
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DATABASE_URL
         fromDatabase:
           name: microtask-db
           property: connectionString
-      # Generate once with:
-      #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-      # Then set the value in Render's dashboard (Environment tab).
-      # Never rotate this key after credentials are stored — it will corrupt them.
+
+      # Fernet encryption key for auth_store (stored session cookies).
+      # Generate once:  python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      # Set the value in Render's Environment tab — never commit it.
       - key: ENCRYPTION_KEY
         sync: false
+
+      # Used by auth_store to derive the Fernet key for .auth_cookies.enc.
+      # Set a long random string in Render's Environment tab.
+      - key: SESSION_SECRET
+        sync: false
+
       - key: PYTHON_VERSION
         value: "3.11.0"
+
+      # Tell Playwright where to find (and install) browser binaries.
+      # Render's build mounts $HOME at /opt/render/project; the browsers
+      # installed during buildCommand end up here and are available at runtime.
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: "/opt/render/project/.playwright-browsers"

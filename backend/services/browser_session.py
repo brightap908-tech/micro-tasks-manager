@@ -10,9 +10,41 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional, Dict
 
+import os as _os
+
 logger = logging.getLogger(__name__)
 
+# When PLAYWRIGHT_BROWSERS_PATH is set (e.g. on Render) tell the Playwright
+# Python package where to look for Chromium at runtime, matching the path used
+# during the build step.  Has no effect when the var is absent (local dev /
+# default ~/.cache/ms-playwright path is used automatically).
+_pbp = _os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+if _pbp:
+    _os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", _pbp)
+
 _sessions: Dict[str, "BrowserSession"] = {}
+
+
+def _friendly_launch_error(raw: str) -> str:
+    """Translate raw Playwright / OS errors into user-readable messages."""
+    r = raw.lower()
+    if "executable doesn't exist" in r or "executable does not exist" in r:
+        return (
+            "Chromium browser is not installed on this server. "
+            "If you are the site owner, re-deploy so the build step can run "
+            "'playwright install --with-deps chromium'."
+        )
+    if "failed to launch" in r or "spawn" in r:
+        return (
+            "Failed to launch the browser. "
+            "The server may be missing system libraries — ensure the deploy ran "
+            "'playwright install --with-deps chromium'."
+        )
+    if "timeout" in r:
+        return "Browser took too long to start — please try again."
+    if "net::err" in r or "name not resolved" in r:
+        return f"Could not reach the login page ({raw[:120]})"
+    return raw[:300]  # truncate very long traces
 _SESSION_TIMEOUT_S = 600  # 10 minutes
 
 _LOGIN_KEYWORDS = frozenset({"login", "signin", "sign-in", "log-in", "authenticate", "auth"})
@@ -67,8 +99,9 @@ class BrowserSession:
             logger.info("Session %s ready at %s", self.session_id, self.login_url)
         except Exception as exc:
             self.status = "error"
-            self.error_message = str(exc)
-            logger.exception("Session %s failed to start", self.session_id)
+            raw = str(exc)
+            self.error_message = _friendly_launch_error(raw)
+            logger.exception("Session %s failed to start: %s", self.session_id, raw)
 
     async def screenshot(self) -> Optional[bytes]:
         if not self._page or self.status in ("starting", "closed"):
