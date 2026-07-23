@@ -64,7 +64,7 @@ async function runSyncAll(websites: Website[]) {
   for (const site of enabled) {
     const url = site.dashboard_url || site.login_url
     try {
-      const result = await syncWebsite(url, site.name)
+      const result = await syncWebsite(url, site.name, site.id)
       await saveSnapshot({
         website_id: site.id,
         status: result.status,

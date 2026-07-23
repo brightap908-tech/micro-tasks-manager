@@ -28,7 +28,8 @@ export interface SyncResult {
   http_status: number | null
 }
 
-export async function syncWebsite(url: string, name: string, cookies?: string | null): Promise<SyncResult> {
-  const { data } = await api.post<SyncResult>('/sync/fetch', { url, name, cookies: cookies ?? null })
+/** website_id tells the backend to use its stored server-side session cookies. */
+export async function syncWebsite(url: string, name: string, website_id?: number): Promise<SyncResult> {
+  const { data } = await api.post<SyncResult>('/sync/fetch', { url, name, website_id: website_id ?? null })
   return data
 }

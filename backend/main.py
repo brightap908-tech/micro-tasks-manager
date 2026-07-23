@@ -20,7 +20,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-from backend.routers import sync
+from backend.routers import sync, auth_browser
 
 logging.basicConfig(level=logging.INFO)
 
@@ -56,6 +56,7 @@ app.add_middleware(
 
 # ── API ────────────────────────────────────────────────────────────────────────
 app.include_router(sync.router)
+app.include_router(auth_browser.router)
 
 
 @app.get("/api/health")
