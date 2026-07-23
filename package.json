@@ -9,7 +9,8 @@
   },
   "scripts": {
     "build": "cd frontend && npm install && npm run build",
-    "postinstall": "npx playwright install --with-deps chromium || true"
+    "install:playwright": "python -m playwright install --with-deps chromium",
+    "build:full": "npm install && python -m playwright install --with-deps chromium && npm run build"
   },
   "author": "",
   "license": "ISC"

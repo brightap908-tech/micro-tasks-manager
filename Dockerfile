@@ -37,10 +37,15 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ── Playwright Chromium + ALL system dependencies ─────────────────────────────
+# PLAYWRIGHT_BROWSERS_PATH pins the install location to a fixed path so the
+# runtime process always finds Chromium regardless of $HOME or user changes.
 # Running as root means apt-get works, so every OS library Chromium needs
 # (libnss3, libglib2.0-0, libatk-bridge2.0-0, libdrm2, libxkbcommon0, etc.)
 # is installed automatically by --with-deps.
-RUN python -m playwright install --with-deps chromium
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN python -m playwright install --with-deps chromium \
+    && python -m playwright install chromium \
+    && echo "✓ Playwright Chromium installed at /ms-playwright"
 
 # ── Application code ──────────────────────────────────────────────────────────
 COPY backend/ ./backend/
