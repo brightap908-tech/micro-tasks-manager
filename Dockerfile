@@ -37,15 +37,41 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ── Playwright Chromium + ALL system dependencies ─────────────────────────────
-# PLAYWRIGHT_BROWSERS_PATH pins the install location to a fixed path so the
-# runtime process always finds Chromium regardless of $HOME or user changes.
-# Running as root means apt-get works, so every OS library Chromium needs
-# (libnss3, libglib2.0-0, libatk-bridge2.0-0, libdrm2, libxkbcommon0, etc.)
-# is installed automatically by --with-deps.
+# PLAYWRIGHT_BROWSERS_PATH pins the install location to a fixed, absolute path
+# so the runtime process always finds Chromium regardless of $HOME or which
+# user the container runs as.
+#
+# Running as root here means apt-get works, so --with-deps installs every
+# OS library Chromium needs in one shot:
+#   libnss3, libglib2.0-0, libatk-bridge2.0-0, libdrm2, libxkbcommon0, …
+#
+# We run --with-deps exactly once (installs OS libs + browser binary), then
+# verify the binary is actually executable before the image is finalised.
+# A missing binary at this point = build failure, not a silent runtime error.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN python -m playwright install --with-deps chromium \
-    && python -m playwright install chromium \
-    && echo "✓ Playwright Chromium installed at /ms-playwright"
+    && echo "✓ Playwright Chromium installed" \
+    && python - <<'EOF'
+import glob, sys
+patterns = [
+    "/ms-playwright/chromium_headless_shell-*/chrome-linux/headless_shell",
+    "/ms-playwright/chromium-headless-shell-*/chrome-linux/headless_shell",
+    "/ms-playwright/chromium_headless_shell-*/chrome-linux/chrome",
+    "/ms-playwright/chromium-*/chrome-linux/chrome",
+]
+found = []
+for p in patterns:
+    found.extend(glob.glob(p))
+if not found:
+    print("ERROR: Playwright Chromium binary not found under /ms-playwright", file=sys.stderr)
+    print("Contents:", file=sys.stderr)
+    import os
+    for root, dirs, files in os.walk("/ms-playwright"):
+        for f in files:
+            print(" ", os.path.join(root, f), file=sys.stderr)
+    sys.exit(1)
+print(f"✓ Chromium binary verified: {found[0]}")
+EOF
 
 # ── Application code ──────────────────────────────────────────────────────────
 COPY backend/ ./backend/

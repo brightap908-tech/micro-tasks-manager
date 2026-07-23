@@ -30,9 +30,11 @@ def _friendly_launch_error(raw: str) -> str:
     """Translate raw Playwright / OS errors into readable messages."""
     r = raw.lower()
     if "executable doesn't exist" in r or "executable does not exist" in r or "browsertype.launch" in r:
+        # Auto-reinstall was already attempted before launch; if it still
+        # fails, a fresh deploy is the only reliable fix.
         return (
-            "Chromium is not installed on this server. "
-            "Run: python -m playwright install chromium"
+            "Browser unavailable — please try again in a moment. "
+            "If the problem persists, trigger a fresh deploy."
         )
     if "failed to launch" in r or "spawn" in r:
         return (
@@ -53,20 +55,20 @@ def _find_nix_chromium() -> str | None:
     Return the path to the Playwright-managed Chromium (or headless-shell)
     executable without launching it.  Checks, in order:
 
-    1. PLAYWRIGHT_BROWSERS_PATH env var (custom install location)
-    2. Workspace-local .cache/ms-playwright  (Replit — installed by this session)
-    3. ~/.cache/ms-playwright                (default Playwright install)
-    4. /nix/store paths for playwright-driver (NixOS / replit.nix)
+    1. PLAYWRIGHT_BROWSERS_PATH env var  (Render Docker — /ms-playwright)
+    2. Workspace-local .cache/ms-playwright  (Replit dev environment)
+    3. ~/.cache/ms-playwright               (default Playwright install)
+    4. /nix/store playwright-driver         (NixOS / replit.nix)
 
-    Returns None if nothing is found; the caller can still attempt a launch
-    and let Playwright resolve the path itself.
+    Returns None if nothing is found; BrowserSession.start() will then
+    attempt an auto-reinstall via _ensure_chromium().
     """
     import glob
     import os
 
     candidates: list[str] = []
 
-    # 1. Explicit env override
+    # 1. Explicit env override — on Render this is /ms-playwright
     pw_home = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
     if pw_home:
         candidates.append(pw_home)
@@ -78,25 +80,31 @@ def _find_nix_chromium() -> str | None:
     # 3. Default user cache
     candidates.append(os.path.join(os.path.expanduser("~"), ".cache", "ms-playwright"))
 
+    # Binary name patterns, most-likely-first:
+    #   - Playwright ≥1.45 installs chromium-headless-shell (binary: headless_shell)
+    #   - Older versions install full chromium (binary: chrome)
+    _BINARY_PATTERNS = [
+        "chromium_headless_shell-*/chrome-linux/headless_shell",
+        "chromium-headless-shell-*/chrome-linux/headless_shell",
+        "chromium_headless_shell-*/chrome-linux/chrome",
+        "chromium-*/chrome-linux/chrome",
+        "chromium-*/chrome-linux/headless_shell",
+    ]
+
     for base in candidates:
-        # headless-shell (newer Playwright) and full chromium layouts
-        for pattern in [
-            "chromium_headless_shell-*/chrome-linux/chrome",
-            "chromium-*/chrome-linux/chrome",
-            "chromium_headless_shell-*/chrome-linux/headless_shell",
-        ]:
+        for pattern in _BINARY_PATTERNS:
             matches = glob.glob(os.path.join(base, pattern))
             if matches:
-                # pick the highest-numbered build
                 matches.sort()
                 path = matches[-1]
                 if os.path.isfile(path) and os.access(path, os.X_OK):
+                    logger.debug("_find_nix_chromium: found %s", path)
                     return path
 
     # 4. Nix store — playwright-driver ships a chromium wrapper
     nix_patterns = [
-        "/nix/store/*/playwright-driver/chromium/*/chrome-linux/chrome",
         "/nix/store/*/playwright-driver/chromium-headless-shell/*/chrome-linux/headless_shell",
+        "/nix/store/*/playwright-driver/chromium/*/chrome-linux/chrome",
     ]
     for pattern in nix_patterns:
         matches = glob.glob(pattern)
@@ -104,7 +112,62 @@ def _find_nix_chromium() -> str | None:
             matches.sort()
             path = matches[-1]
             if os.path.isfile(path) and os.access(path, os.X_OK):
+                logger.debug("_find_nix_chromium: found (nix) %s", path)
                 return path
+
+    logger.debug("_find_nix_chromium: no executable found in any candidate location")
+    return None
+
+
+async def _ensure_chromium() -> str | None:
+    """
+    Return the Chromium executable path, auto-reinstalling if necessary.
+
+    On Render (Docker) PLAYWRIGHT_BROWSERS_PATH=/ms-playwright is baked into
+    the image at build time so the binary is almost always present.  This
+    function acts as a safety net for edge cases (first deploy, layer cache
+    miss, corrupted image layer, etc.).
+
+    We intentionally skip --with-deps here: OS libraries were already
+    installed by the Dockerfile's 'playwright install --with-deps chromium'
+    step, and apt-get may not be available at runtime.
+    """
+    path = _find_nix_chromium()
+    if path:
+        return path
+
+    logger.warning(
+        "Chromium binary not found at expected location — "
+        "attempting automatic reinstall (OS deps already present from build)."
+    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "python", "-m", "playwright", "install", "chromium",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.communicate()
+            logger.error("Playwright auto-reinstall timed out after 120 s")
+            return None
+
+        if proc.returncode == 0:
+            logger.info(
+                "Playwright Chromium reinstalled successfully: %s",
+                stdout.decode().strip()[-200:],
+            )
+            return _find_nix_chromium()
+        else:
+            logger.error(
+                "Playwright reinstall failed (exit %d):\n%s",
+                proc.returncode,
+                stderr.decode().strip()[-400:],
+            )
+    except Exception as exc:
+        logger.error("Playwright reinstall error: %s", exc)
 
     return None
 
@@ -126,6 +189,10 @@ class BrowserSession:
     async def start(self) -> None:
         try:
             from playwright.async_api import async_playwright
+
+            # Locate Chromium; auto-reinstall if the binary is missing.
+            chromium_path = await _ensure_chromium()
+
             self._pw = await async_playwright().start()
 
             launch_kwargs: dict = {
@@ -139,12 +206,13 @@ class BrowserSession:
                     "--single-process",
                 ],
             }
-            chromium_path = _find_nix_chromium()
             if chromium_path:
                 launch_kwargs["executable_path"] = chromium_path
-                logger.info("Session %s: using Chromium at %s", self.session_id, chromium_path)
+                logger.info("Session %s: launching Chromium at %s", self.session_id, chromium_path)
             else:
-                logger.info("Session %s: using Playwright default Chromium", self.session_id)
+                # PLAYWRIGHT_BROWSERS_PATH env var lets Playwright find it
+                # even without an explicit path (last-resort fallback).
+                logger.info("Session %s: launching Chromium via Playwright default resolution", self.session_id)
 
             self._browser = await self._pw.chromium.launch(**launch_kwargs)
             self._context = await self._browser.new_context(
