@@ -32,8 +32,7 @@ def _friendly_launch_error(raw: str) -> str:
     if "executable doesn't exist" in r or "executable does not exist" in r or "browsertype.launch" in r:
         return (
             "Chromium is not installed on this server. "
-            "Trigger a fresh deploy — the build step will run "
-            "'playwright install --with-deps chromium' automatically."
+            "Run: python -m playwright install chromium"
         )
     if "failed to launch" in r or "spawn" in r:
         return (
@@ -47,27 +46,67 @@ def _friendly_launch_error(raw: str) -> str:
     return raw[:300]
 
 
-# ── Startup availability check ────────────────────────────────────────────────
+# ── Chromium executable discovery (no launch, no subprocess) ──────────────────
 
-async def check_chromium_available() -> tuple[bool, str]:
+def _find_nix_chromium() -> str | None:
     """
-    Probe whether Chromium can be launched on this server.
-    Called once at app startup so problems surface in logs immediately rather
-    than silently failing when the first user tries to log in.
-    Returns (ok, message).
+    Return the path to the Playwright-managed Chromium (or headless-shell)
+    executable without launching it.  Checks, in order:
+
+    1. PLAYWRIGHT_BROWSERS_PATH env var (custom install location)
+    2. Workspace-local .cache/ms-playwright  (Replit — installed by this session)
+    3. ~/.cache/ms-playwright                (default Playwright install)
+    4. /nix/store paths for playwright-driver (NixOS / replit.nix)
+
+    Returns None if nothing is found; the caller can still attempt a launch
+    and let Playwright resolve the path itself.
     """
-    try:
-        from playwright.async_api import async_playwright
-        async with async_playwright() as pw:
-            browser = await pw.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-setuid-sandbox",
-                      "--disable-dev-shm-usage", "--disable-gpu"],
-            )
-            await browser.close()
-        return True, "Chromium launched successfully."
-    except Exception as exc:
-        return False, _friendly_launch_error(str(exc))
+    import glob
+    import os
+
+    candidates: list[str] = []
+
+    # 1. Explicit env override
+    pw_home = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if pw_home:
+        candidates.append(pw_home)
+
+    # 2. Workspace-local cache (Replit)
+    workspace = os.environ.get("REPL_HOME", os.path.expanduser("~"))
+    candidates.append(os.path.join(workspace, ".cache", "ms-playwright"))
+
+    # 3. Default user cache
+    candidates.append(os.path.join(os.path.expanduser("~"), ".cache", "ms-playwright"))
+
+    for base in candidates:
+        # headless-shell (newer Playwright) and full chromium layouts
+        for pattern in [
+            "chromium_headless_shell-*/chrome-linux/chrome",
+            "chromium-*/chrome-linux/chrome",
+            "chromium_headless_shell-*/chrome-linux/headless_shell",
+        ]:
+            matches = glob.glob(os.path.join(base, pattern))
+            if matches:
+                # pick the highest-numbered build
+                matches.sort()
+                path = matches[-1]
+                if os.path.isfile(path) and os.access(path, os.X_OK):
+                    return path
+
+    # 4. Nix store — playwright-driver ships a chromium wrapper
+    nix_patterns = [
+        "/nix/store/*/playwright-driver/chromium/*/chrome-linux/chrome",
+        "/nix/store/*/playwright-driver/chromium-headless-shell/*/chrome-linux/headless_shell",
+    ]
+    for pattern in nix_patterns:
+        matches = glob.glob(pattern)
+        if matches:
+            matches.sort()
+            path = matches[-1]
+            if os.path.isfile(path) and os.access(path, os.X_OK):
+                return path
+
+    return None
 
 
 class BrowserSession:
@@ -88,9 +127,10 @@ class BrowserSession:
         try:
             from playwright.async_api import async_playwright
             self._pw = await async_playwright().start()
-            self._browser = await self._pw.chromium.launch(
-                headless=True,
-                args=[
+
+            launch_kwargs: dict = {
+                "headless": True,
+                "args": [
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
@@ -98,7 +138,15 @@ class BrowserSession:
                     "--disable-software-rasterizer",
                     "--single-process",
                 ],
-            )
+            }
+            chromium_path = _find_nix_chromium()
+            if chromium_path:
+                launch_kwargs["executable_path"] = chromium_path
+                logger.info("Session %s: using Chromium at %s", self.session_id, chromium_path)
+            else:
+                logger.info("Session %s: using Playwright default Chromium", self.session_id)
+
+            self._browser = await self._pw.chromium.launch(**launch_kwargs)
             self._context = await self._browser.new_context(
                 viewport=_VIEWPORT,
                 user_agent=_UA,

@@ -22,7 +22,6 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from backend.routers import sync, auth_browser
-from backend.services.browser_session import check_chromium_available
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,20 +29,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ── startup: probe Chromium so problems appear in logs immediately ──
-    ok, msg = await check_chromium_available()
-    if ok:
-        logger.info("✓ Playwright Chromium check passed: %s", msg)
-    else:
-        logger.warning("✗ Playwright Chromium unavailable: %s", msg)
-        logger.warning(
-            "  Login/browser sessions will fail until Chromium is installed. "
-            "On Render, trigger a fresh deploy — the buildCommand runs "
-            "'python -m playwright install --with-deps chromium' automatically."
-        )
-    # store result so /api/health can report it
-    app.state.chromium_ok = ok
-    app.state.chromium_msg = msg
+    # Startup: no browser probe — Chromium is launched only when a session
+    # is actually requested (via BackgroundTasks in auth_browser router).
+    logger.info("Microtask Manager started.")
     yield
     # ── shutdown ──────────────────────────────────────────────────────────
 
@@ -85,15 +73,16 @@ app.include_router(auth_browser.router)
 
 @app.get("/api/health")
 def health():
-    chromium_ok  = getattr(app.state, "chromium_ok",  None)
-    chromium_msg = getattr(app.state, "chromium_msg", "not checked yet")
+    """Lightweight liveness check — never starts a browser."""
+    from backend.services.browser_session import _find_nix_chromium
+    chromium_path = _find_nix_chromium()
     return {
         "status": "ok",
         "service": "Microtask Manager",
         "storage": "IndexedDB (client-side)",
         "chromium": {
-            "available": chromium_ok,
-            "message":   chromium_msg,
+            "executable": chromium_path,
+            "available": chromium_path is not None,
         },
     }
 
