@@ -70,6 +70,9 @@ async function runSyncAll(websites: Website[]) {
         status: result.status,
         available_balance: result.available_balance ?? undefined,
         available_tasks: result.available_tasks ?? undefined,
+        pending_tasks: result.pending_tasks ?? undefined,
+        completed_tasks: result.completed_tasks ?? undefined,
+        total_earnings: result.total_earnings ?? undefined,
         page_title: result.page_title ?? undefined,
         error_message: result.error_message ?? undefined,
       })
@@ -100,7 +103,9 @@ async function runSyncAll(websites: Website[]) {
     }
   }
 
-  const succeeded = results.filter(r => r.result.status === 'ok').length
+  const succeeded = results.filter(
+    r => r.result.status === 'ok' && (r.result.extracted_value_count ?? 0) > 0,
+  ).length
   await logActivity(
     `Synced ${succeeded}/${enabled.length} websites`,
     results

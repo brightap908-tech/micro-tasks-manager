@@ -86,9 +86,14 @@ def _find_nix_chromium() -> str | None:
     _BINARY_PATTERNS = [
         "chromium_headless_shell-*/chrome-linux/headless_shell",
         "chromium-headless-shell-*/chrome-linux/headless_shell",
+        "chromium_headless_shell-*/chrome-linux64/headless_shell",
+        "chromium-headless-shell-*/chrome-linux64/headless_shell",
         "chromium_headless_shell-*/chrome-linux/chrome",
         "chromium-*/chrome-linux/chrome",
         "chromium-*/chrome-linux/headless_shell",
+        "chromium_headless_shell-*/chrome-linux64/chrome",
+        "chromium-*/chrome-linux64/chrome",
+        "chromium-*/chrome-linux64/headless_shell",
     ]
 
     for base in candidates:

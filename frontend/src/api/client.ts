@@ -26,6 +26,10 @@ export interface SyncResult {
   error_detail: string | null
   synced_at: string
   http_status: number | null
+  final_url?: string | null
+  dashboard_html_path?: string | null
+  selector_diagnostics?: Record<string, unknown> | null
+  extracted_value_count?: number
 }
 
 /** website_id tells the backend to use its stored server-side session cookies. */

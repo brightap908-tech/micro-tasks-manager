@@ -13,6 +13,7 @@ build/
 .encryption.key
 microtask_manager.db
 backups/
+sync_debug/
 
 # Node
 node_modules/

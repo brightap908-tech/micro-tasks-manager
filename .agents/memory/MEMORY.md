@@ -1,0 +1,1 @@
+- [Authenticated dashboard sync](authenticated-dashboard-sync.md) — JavaScript-rendered dashboards require the saved Playwright session context, not a cookie-forwarded HTTP fetch.
