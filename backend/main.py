@@ -12,6 +12,7 @@ or task submission on behalf of the user.
 
 import os
 import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -21,8 +22,30 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from backend.routers import sync, auth_browser
+from backend.services.browser_session import check_chromium_available
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # ── startup: probe Chromium so problems appear in logs immediately ──
+    ok, msg = await check_chromium_available()
+    if ok:
+        logger.info("✓ Playwright Chromium check passed: %s", msg)
+    else:
+        logger.warning("✗ Playwright Chromium unavailable: %s", msg)
+        logger.warning(
+            "  Login/browser sessions will fail until Chromium is installed. "
+            "On Render, trigger a fresh deploy — the buildCommand runs "
+            "'python -m playwright install --with-deps chromium' automatically."
+        )
+    # store result so /api/health can report it
+    app.state.chromium_ok = ok
+    app.state.chromium_msg = msg
+    yield
+    # ── shutdown ──────────────────────────────────────────────────────────
 
 FRONTEND_DIST = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
@@ -40,6 +63,7 @@ app = FastAPI(
         "returns extracted data. All app data is stored in browser IndexedDB."
     ),
     version="2.0.0",
+    lifespan=lifespan,
 )
 
 # Attach limiter to app state (required by slowapi)
@@ -61,7 +85,17 @@ app.include_router(auth_browser.router)
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "Microtask Manager", "storage": "IndexedDB (client-side)"}
+    chromium_ok  = getattr(app.state, "chromium_ok",  None)
+    chromium_msg = getattr(app.state, "chromium_msg", "not checked yet")
+    return {
+        "status": "ok",
+        "service": "Microtask Manager",
+        "storage": "IndexedDB (client-side)",
+        "chromium": {
+            "available": chromium_ok,
+            "message":   chromium_msg,
+        },
+    }
 
 
 # ── Static assets ──────────────────────────────────────────────────────────────

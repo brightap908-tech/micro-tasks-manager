@@ -10,41 +10,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional, Dict
 
-import os as _os
-
 logger = logging.getLogger(__name__)
 
-# When PLAYWRIGHT_BROWSERS_PATH is set (e.g. on Render) tell the Playwright
-# Python package where to look for Chromium at runtime, matching the path used
-# during the build step.  Has no effect when the var is absent (local dev /
-# default ~/.cache/ms-playwright path is used automatically).
-_pbp = _os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
-if _pbp:
-    _os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", _pbp)
-
 _sessions: Dict[str, "BrowserSession"] = {}
-
-
-def _friendly_launch_error(raw: str) -> str:
-    """Translate raw Playwright / OS errors into user-readable messages."""
-    r = raw.lower()
-    if "executable doesn't exist" in r or "executable does not exist" in r:
-        return (
-            "Chromium browser is not installed on this server. "
-            "If you are the site owner, re-deploy so the build step can run "
-            "'playwright install --with-deps chromium'."
-        )
-    if "failed to launch" in r or "spawn" in r:
-        return (
-            "Failed to launch the browser. "
-            "The server may be missing system libraries — ensure the deploy ran "
-            "'playwright install --with-deps chromium'."
-        )
-    if "timeout" in r:
-        return "Browser took too long to start — please try again."
-    if "net::err" in r or "name not resolved" in r:
-        return f"Could not reach the login page ({raw[:120]})"
-    return raw[:300]  # truncate very long traces
 _SESSION_TIMEOUT_S = 600  # 10 minutes
 
 _LOGIN_KEYWORDS = frozenset({"login", "signin", "sign-in", "log-in", "authenticate", "auth"})
@@ -56,6 +24,50 @@ _UA = (
     "Chrome/124.0.6367.82 Mobile Safari/537.36"
 )
 _VIEWPORT = {"width": 390, "height": 844}
+
+
+def _friendly_launch_error(raw: str) -> str:
+    """Translate raw Playwright / OS errors into readable messages."""
+    r = raw.lower()
+    if "executable doesn't exist" in r or "executable does not exist" in r or "browsertype.launch" in r:
+        return (
+            "Chromium is not installed on this server. "
+            "Trigger a fresh deploy — the build step will run "
+            "'playwright install --with-deps chromium' automatically."
+        )
+    if "failed to launch" in r or "spawn" in r:
+        return (
+            "Failed to launch the browser — a required system library may be missing. "
+            "Trigger a fresh deploy to reinstall Playwright system dependencies."
+        )
+    if "timeout" in r:
+        return "Browser took too long to start — please try again."
+    if "net::err" in r or "name not resolved" in r:
+        return f"Could not reach the login page ({raw[:120]})"
+    return raw[:300]
+
+
+# ── Startup availability check ────────────────────────────────────────────────
+
+async def check_chromium_available() -> tuple[bool, str]:
+    """
+    Probe whether Chromium can be launched on this server.
+    Called once at app startup so problems surface in logs immediately rather
+    than silently failing when the first user tries to log in.
+    Returns (ok, message).
+    """
+    try:
+        from playwright.async_api import async_playwright
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-setuid-sandbox",
+                      "--disable-dev-shm-usage", "--disable-gpu"],
+            )
+            await browser.close()
+        return True, "Chromium launched successfully."
+    except Exception as exc:
+        return False, _friendly_launch_error(str(exc))
 
 
 class BrowserSession:
@@ -187,15 +199,13 @@ class BrowserSession:
             return
         try:
             url = self._page.url.lower()
-            # Still on a login-looking URL
             if any(kw in url for kw in _LOGIN_KEYWORDS):
                 return
             html = await self._page.content()
             hl = html.lower()
             has_password = 'type="password"' in hl or "type='password'" in hl
             if has_password:
-                return  # still a login form
-            # Heuristic: page has dashboard-like content
+                return
             dashboard_signals = sum([
                 "dashboard" in hl,
                 "balance" in hl,
@@ -228,7 +238,6 @@ class BrowserSession:
 # ── Session lifecycle ─────────────────────────────────────────────────────────
 
 async def create_session(website_id: int, login_url: str) -> BrowserSession:
-    # Close any existing session for this website
     for sess in list(_sessions.values()):
         if sess.website_id == website_id:
             await sess.close()

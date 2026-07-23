@@ -8,10 +8,12 @@ services:
   - type: web
     name: microtask-manager
     runtime: python
-    # Build order:
-    #  1. Python packages (includes the `playwright` Python package)
-    #  2. Download Chromium binary + system-level OS deps (libglib, libnss, …)
-    #  3. Build the React frontend
+    # Build order matters:
+    #  1. Python packages  (gets the playwright Python library)
+    #  2. Playwright browsers  (downloads Chromium + OS system libs via apt)
+    #  3. Frontend  (React build)
+    # Browsers land in ~/.cache/ms-playwright, which Render preserves between
+    # build and run phases — no PLAYWRIGHT_BROWSERS_PATH override needed.
     buildCommand: >-
       pip install -r requirements.txt &&
       python -m playwright install --with-deps chromium &&
@@ -24,21 +26,21 @@ services:
           property: connectionString
 
       # Fernet encryption key for auth_store (stored session cookies).
-      # Generate once:  python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-      # Set the value in Render's Environment tab — never commit it.
+      # Generate once:
+      #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      # Paste the result into Render's Environment tab — never commit it.
       - key: ENCRYPTION_KEY
         sync: false
 
       # Used by auth_store to derive the Fernet key for .auth_cookies.enc.
-      # Set a long random string in Render's Environment tab.
+      # Set any long random string in Render's Environment tab.
       - key: SESSION_SECRET
         sync: false
 
       - key: PYTHON_VERSION
         value: "3.11.0"
 
-      # Tell Playwright where to find (and install) browser binaries.
-      # Render's build mounts $HOME at /opt/render/project; the browsers
-      # installed during buildCommand end up here and are available at runtime.
-      - key: PLAYWRIGHT_BROWSERS_PATH
-        value: "/opt/render/project/.playwright-browsers"
+      # NOTE: PLAYWRIGHT_BROWSERS_PATH is intentionally NOT set here.
+      # Playwright's default location (~/.cache/ms-playwright) is used,
+      # which Render's build disk preserves into the running container.
+      # Setting a non-default path caused the "Executable doesn't exist" error.

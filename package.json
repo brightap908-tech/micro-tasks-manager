@@ -8,7 +8,8 @@
     "url": "git+https://github.com/brightap908-tech/micro-tasks-manager.git"
   },
   "scripts": {
-    "build": "cd frontend && npm install && npm run build"
+    "build": "cd frontend && npm install && npm run build",
+    "postinstall": "npx playwright install --with-deps chromium || true"
   },
   "author": "",
   "license": "ISC"
