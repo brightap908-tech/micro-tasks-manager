@@ -84,9 +84,12 @@ export interface WebsiteSnapshot {
   website_id: number
   status: 'ok' | 'auth_required' | 'error'
   available_balance?: number
+  pending_balance?: number
   available_tasks?: number
   pending_tasks?: number
   completed_tasks?: number
+  in_progress_tasks?: number
+  skipped_tasks?: number
   total_earnings?: number
   page_title?: string
   error_message?: string

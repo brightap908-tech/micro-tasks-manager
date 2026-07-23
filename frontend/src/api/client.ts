@@ -17,9 +17,12 @@ export interface SyncRequest {
 export interface SyncResult {
   status: 'ok' | 'auth_required' | 'error'
   available_balance: number | null
+  pending_balance: number | null
   available_tasks: number | null
   pending_tasks: number | null
   completed_tasks: number | null
+  in_progress_tasks: number | null
+  skipped_tasks: number | null
   total_earnings: number | null
   page_title: string | null
   error_message: string | null
@@ -28,6 +31,7 @@ export interface SyncResult {
   http_status: number | null
   final_url?: string | null
   dashboard_html_path?: string | null
+  dashboard_screenshot_path?: string | null
   selector_diagnostics?: Record<string, unknown> | null
   extracted_value_count?: number
 }

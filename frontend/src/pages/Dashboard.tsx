@@ -69,9 +69,12 @@ async function runSyncAll(websites: Website[]) {
         website_id: site.id,
         status: result.status,
         available_balance: result.available_balance ?? undefined,
+        pending_balance: result.pending_balance ?? undefined,
         available_tasks: result.available_tasks ?? undefined,
         pending_tasks: result.pending_tasks ?? undefined,
         completed_tasks: result.completed_tasks ?? undefined,
+        in_progress_tasks: result.in_progress_tasks ?? undefined,
+        skipped_tasks: result.skipped_tasks ?? undefined,
         total_earnings: result.total_earnings ?? undefined,
         page_title: result.page_title ?? undefined,
         error_message: result.error_message ?? undefined,
@@ -89,9 +92,12 @@ async function runSyncAll(websites: Website[]) {
         result: {
           status: 'error',
           available_balance: null,
+          pending_balance: null,
           available_tasks: null,
           pending_tasks: null,
           completed_tasks: null,
+          in_progress_tasks: null,
+          skipped_tasks: null,
           total_earnings: null,
           page_title: null,
           error_message: `Network error: ${errorDetail}`,
@@ -206,6 +212,7 @@ export default function Dashboard() {
   const isSyncing = syncMutation.isPending
   const activeWebsites = websites.filter(w => w.is_enabled)
   const totalBalance = (syncInfo?.available_balance ?? 0)
+  const syncedEarnings = syncInfo?.total_earnings ?? 0
   const syncStatus = syncInfo?.status ?? 'never'
   const lastSync = syncInfo?.last_sync_at
 
@@ -266,21 +273,25 @@ export default function Dashboard() {
               icon={<Wallet size={18} />}
               label="Available Balance"
               value={`$${totalBalance.toFixed(2)}`}
-              sub="Click Sync to fetch"
+              sub={syncInfo?.pending_balance
+                ? `$${syncInfo.pending_balance.toFixed(2)} pending · ${syncInfo.available_tasks ?? 0} available · Click Sync to refresh`
+                : syncInfo?.status === 'ok'
+                  ? `${syncInfo.available_tasks ?? 0} available tasks · Click Sync to refresh`
+                : 'Click Sync to fetch'}
               color="yellow"
             />
             <StatCard
               icon={<DollarSign size={18} />}
               label="Total Earnings"
-              value={`$${(stats?.total_earnings ?? 0).toFixed(2)}`}
-              sub="All completed tasks"
+               value={`$${(syncInfo?.status === 'ok' ? syncedEarnings : (stats?.total_earnings ?? 0)).toFixed(2)}`}
+               sub={syncInfo?.status === 'ok' ? 'From connected sites' : 'All completed tasks'}
               color="green"
             />
             <StatCard
               icon={<CheckSquare size={18} />}
               label="Tasks Completed"
-              value={String(stats?.tasks_completed ?? 0)}
-              sub={`${stats?.tasks_pending ?? 0} pending`}
+               value={String(syncInfo?.status === 'ok' ? (syncInfo.completed_tasks ?? 0) : (stats?.tasks_completed ?? 0))}
+               sub={`${syncInfo?.status === 'ok' ? (syncInfo.pending_tasks ?? 0) : (stats?.tasks_pending ?? 0)} pending`}
               color="blue"
             />
             <StatCard
@@ -300,8 +311,8 @@ export default function Dashboard() {
             <StatCard
               icon={<AlertCircle size={18} />}
               label="In Progress"
-              value={String(stats?.tasks_in_progress ?? 0)}
-              sub={`${stats?.tasks_skipped ?? 0} skipped`}
+               value={String(syncInfo?.status === 'ok' ? (syncInfo.in_progress_tasks ?? 0) : (stats?.tasks_in_progress ?? 0))}
+               sub={`${syncInfo?.status === 'ok' ? (syncInfo.skipped_tasks ?? 0) : (stats?.tasks_skipped ?? 0)} skipped`}
               color="red"
             />
           </>

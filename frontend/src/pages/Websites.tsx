@@ -343,9 +343,12 @@ export default function WebsitesPage() {
         website_id: site.id,
         status: result.status,
         available_balance: result.available_balance ?? undefined,
+        pending_balance: result.pending_balance ?? undefined,
         available_tasks: result.available_tasks ?? undefined,
         pending_tasks: result.pending_tasks ?? undefined,
         completed_tasks: result.completed_tasks ?? undefined,
+        in_progress_tasks: result.in_progress_tasks ?? undefined,
+        skipped_tasks: result.skipped_tasks ?? undefined,
         total_earnings: result.total_earnings ?? undefined,
         page_title: result.page_title ?? undefined,
         error_message: result.error_message ?? undefined,
@@ -356,8 +359,11 @@ export default function WebsitesPage() {
       if (result.status === 'ok') {
         const parts: string[] = []
         if (result.available_balance !== null) parts.push(`$${result.available_balance!.toFixed(2)}`)
+        if (result.pending_balance !== null) parts.push(`$${result.pending_balance!.toFixed(2)} pending balance`)
         if (result.pending_tasks !== null) parts.push(`${result.pending_tasks} pending`)
         if (result.completed_tasks !== null) parts.push(`${result.completed_tasks} done`)
+        if (result.in_progress_tasks !== null) parts.push(`${result.in_progress_tasks} in progress`)
+        if (result.skipped_tasks !== null) parts.push(`${result.skipped_tasks} skipped`)
         toast.success(`${site.name}: ${parts.length ? parts.join(' · ') : 'synced'}`)
       } else if (result.status === 'auth_required') {
         toast(`${site.name}: ${result.error_message ?? 'Login required'}`, { icon: '🔐', duration: 5000 })
@@ -384,8 +390,11 @@ export default function WebsitesPage() {
     if (snap.status === 'ok') {
       const parts: string[] = []
       if (snap.available_balance !== undefined) parts.push(`$${snap.available_balance.toFixed(2)}`)
+      if (snap.pending_balance !== undefined) parts.push(`$${snap.pending_balance.toFixed(2)} pending balance`)
       if (snap.pending_tasks !== undefined) parts.push(`${snap.pending_tasks} pending`)
       if (snap.completed_tasks !== undefined) parts.push(`${snap.completed_tasks} done`)
+      if (snap.in_progress_tasks !== undefined) parts.push(`${snap.in_progress_tasks} in progress`)
+      if (snap.skipped_tasks !== undefined) parts.push(`${snap.skipped_tasks} skipped`)
       if (snap.total_earnings !== undefined) parts.push(`$${snap.total_earnings.toFixed(2)} earned`)
       return <span className="text-xs text-green-400">{parts.length ? parts.join(' · ') : '✓ synced'}</span>
     }

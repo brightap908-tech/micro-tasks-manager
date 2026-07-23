@@ -106,9 +106,12 @@ class SyncRequest(BaseModel):
 class SyncResult(BaseModel):
     status: str
     available_balance: Optional[float] = None
+    pending_balance: Optional[float] = None
     available_tasks: Optional[int] = None
     pending_tasks: Optional[int] = None
     completed_tasks: Optional[int] = None
+    in_progress_tasks: Optional[int] = None
+    skipped_tasks: Optional[int] = None
     total_earnings: Optional[float] = None
     page_title: Optional[str] = None
     error_message: Optional[str] = None
@@ -117,6 +120,7 @@ class SyncResult(BaseModel):
     http_status: Optional[int] = None
     final_url: Optional[str] = None
     dashboard_html_path: Optional[str] = None
+    dashboard_screenshot_path: Optional[str] = None
     selector_diagnostics: Optional[dict] = None
     extracted_value_count: int = 0
 
@@ -191,50 +195,133 @@ _MAX_SAMPLE_LENGTH = 300
 # IDs/classes; its parser still requires the metric label to be nearby.
 _METRIC_SELECTORS: dict[str, tuple[str, ...]] = {
     "available_balance": (
-        '[data-testid="available-balance"]',
+        '[data-testid*="available-balance" i]',
+        '[data-test*="available-balance" i]',
+        '[data-testid*="wallet" i]',
         '[data-testid*="balance" i]',
+        '[id*="available-balance" i]',
+        '[id*="wallet" i]',
         '[id*="balance" i]',
+        '[class*="available-balance" i]',
+        '[class*="wallet-balance" i]',
         '[class*="balance" i]',
         '[aria-label*="available balance" i]',
+        '[aria-label*="wallet balance" i]',
+        '[title*="available balance" i]',
+        "body",
+    ),
+    "pending_balance": (
+        '[data-testid*="pending-balance" i]',
+        '[data-testid*="outstanding" i]',
+        '[data-testid*="pending-payout" i]',
+        '[id*="pending-balance" i]',
+        '[id*="outstanding" i]',
+        '[class*="pending-balance" i]',
+        '[class*="outstanding" i]',
+        '[class*="pending-payout" i]',
+        '[aria-label*="pending balance" i]',
+        '[aria-label*="outstanding" i]',
+        '[title*="pending balance" i]',
         "body",
     ),
     "pending_tasks": (
-        '[data-testid="pending-tasks"]',
         '[data-testid*="pending" i]',
+        '[data-test*="pending" i]',
         '[id*="pending" i]',
         '[class*="pending" i]',
         '[aria-label*="pending task" i]',
+        '[title*="pending task" i]',
+        'main',
+        '[role="main"]',
         "body",
     ),
     "available_tasks": (
-        '[data-testid="available-tasks"]',
         '[data-testid*="available-task" i]',
+        '[data-test*="available-task" i]',
         '[id*="available-task" i]',
         '[class*="available-task" i]',
         '[aria-label*="available task" i]',
+        '[title*="available task" i]',
+        'main',
+        '[role="main"]',
         "body",
     ),
     "total_earnings": (
-        '[data-testid="total-earnings"]',
+        '[data-testid*="total-earning" i]',
         '[data-testid*="earnings" i]',
+        '[data-test*="earning" i]',
+        '[id*="total-earning" i]',
         '[id*="earnings" i]',
+        '[class*="total-earning" i]',
         '[class*="earnings" i]',
         '[aria-label*="total earning" i]',
+        '[title*="total earning" i]',
+        'main',
+        '[role="main"]',
         "body",
     ),
     "completed_tasks": (
-        '[data-testid="completed-tasks"]',
         '[data-testid*="completed" i]',
+        '[data-test*="completed" i]',
         '[id*="completed" i]',
         '[class*="completed" i]',
         '[aria-label*="completed task" i]',
+        '[title*="completed task" i]',
+        'main',
+        '[role="main"]',
+        "body",
+    ),
+    "in_progress_tasks": (
+        '[data-testid*="in-progress" i]',
+        '[data-testid*="in_progress" i]',
+        '[data-testid*="active-task" i]',
+        '[data-test*="in-progress" i]',
+        '[id*="in-progress" i]',
+        '[id*="in_progress" i]',
+        '[id*="active-task" i]',
+        '[class*="in-progress" i]',
+        '[class*="in_progress" i]',
+        '[class*="active-task" i]',
+        '[aria-label*="in progress" i]',
+        '[aria-label*="active task" i]',
+        '[title*="in progress" i]',
+        'main',
+        '[role="main"]',
+        "body",
+    ),
+    "skipped_tasks": (
+        '[data-testid*="skipped" i]',
+        '[data-testid*="declined" i]',
+        '[data-test*="skipped" i]',
+        '[id*="skipped" i]',
+        '[id*="declined" i]',
+        '[class*="skipped" i]',
+        '[class*="declined" i]',
+        '[aria-label*="skipped task" i]',
+        '[aria-label*="declined task" i]',
+        '[title*="skipped task" i]',
+        'main',
+        '[role="main"]',
         "body",
     ),
 }
 
 _METRIC_LABELS: dict[str, tuple[str, ...]] = {
-    "available_balance": (r"available\s+balance", r"wallet\s+balance", r"\bbalance\b"),
-    "pending_tasks": (r"pending\s+tasks?", r"\bpending\b"),
+    "available_balance": (
+        r"available\s+balance",
+        r"wallet\s+balance",
+        r"current\s+balance",
+        r"withdrawable",
+        r"(?<!pending )\bbalance\b",
+    ),
+    "pending_balance": (
+        r"pending\s+balance",
+        r"pending\s+payout",
+        r"outstanding\s+balance",
+        r"processing\s+balance",
+        r"unpaid\s+balance",
+    ),
+    "pending_tasks": (r"pending\s+tasks?", r"tasks?\s+pending"),
     "available_tasks": (r"available\s+tasks?", r"tasks?\s+available", r"available\s+gigs?"),
     "total_earnings": (
         r"total\s+earnings?",
@@ -246,6 +333,20 @@ _METRIC_LABELS: dict[str, tuple[str, ...]] = {
         r"completed\s+tasks?",
         r"tasks?\s+completed",
         r"\bcompleted\b",
+    ),
+    "in_progress_tasks": (
+        r"in[\s_-]+progress\s+tasks?",
+        r"tasks?\s+in[\s_-]+progress",
+        r"active\s+tasks?",
+        r"working\s+tasks?",
+        r"\bin[\s_-]+progress\b",
+    ),
+    "skipped_tasks": (
+        r"skipped\s+tasks?",
+        r"tasks?\s+skipped",
+        r"declined\s+tasks?",
+        r"tasks?\s+declined",
+        r"\bskipped\b",
     ),
 }
 
@@ -293,11 +394,27 @@ async def _fetch_authenticated_dashboard(
                 await context.add_cookies(cookies)
 
             page = await context.new_page()
+            dashboard_responses: list[dict[str, object]] = []
+
+            def record_dashboard_response(response) -> None:
+                resource = response.request.resource_type
+                response_url = response.url.lower()
+                if resource in {"xhr", "fetch"} or any(
+                    marker in response_url for marker in ("api", "dashboard", "account", "task", "earnings", "balance")
+                ):
+                    dashboard_responses.append({
+                        "url": response.url[:500],
+                        "status": response.status,
+                        "resource_type": resource,
+                    })
+
+            page.on("response", record_dashboard_response)
             response = await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
             try:
                 await page.wait_for_load_state("networkidle", timeout=8_000)
             except Exception:
                 logger.info("Sync: networkidle wait timed out; parsing current DOM")
+            await _wait_for_dashboard_ready(page)
 
             final_url = page.url
             http_status = response.status if response else None
@@ -361,6 +478,14 @@ async def _fetch_authenticated_dashboard(
             )
             metrics, diagnostics = await _extract_dashboard_metrics(page)
             extracted_count = sum(value is not None for value in metrics.values())
+            screenshot_path = None
+            if extracted_count < len(metrics):
+                screenshot_path = await _capture_dashboard_screenshot(page, website_id)
+                logger.warning(
+                    "Sync: dashboard extraction incomplete website_id=%s screenshot=%s",
+                    website_id,
+                    screenshot_path or "not-written",
+                )
             logger.info(
                 "Sync: extracted values before save website_id=%s values=%s extracted_count=%d",
                 website_id,
@@ -375,6 +500,8 @@ async def _fetch_authenticated_dashboard(
                     "html_path": html_path,
                     "metrics": metrics,
                     "selectors": diagnostics,
+                    "dashboard_responses": dashboard_responses[-50:],
+                    "screenshot_path": screenshot_path,
                 },
                 indent=2,
             )
@@ -387,9 +514,12 @@ async def _fetch_authenticated_dashboard(
                 return SyncResult(
                     status="error",
                     available_balance=metrics["available_balance"],
+                    pending_balance=metrics["pending_balance"],
                     available_tasks=metrics["available_tasks"],
                     pending_tasks=metrics["pending_tasks"],
                     completed_tasks=metrics["completed_tasks"],
+                    in_progress_tasks=metrics["in_progress_tasks"],
+                    skipped_tasks=metrics["skipped_tasks"],
                     total_earnings=metrics["total_earnings"],
                     page_title=await page.title(),
                     error_message="Dashboard reached, but no dashboard values were extracted",
@@ -397,6 +527,7 @@ async def _fetch_authenticated_dashboard(
                     synced_at=timestamp,
                     final_url=final_url,
                     dashboard_html_path=html_path,
+                    dashboard_screenshot_path=screenshot_path,
                     selector_diagnostics=diagnostics,
                     extracted_value_count=0,
                     http_status=http_status,
@@ -405,14 +536,18 @@ async def _fetch_authenticated_dashboard(
             return SyncResult(
                 status="ok",
                 available_balance=metrics["available_balance"],
+                pending_balance=metrics["pending_balance"],
                 available_tasks=metrics["available_tasks"],
                 pending_tasks=metrics["pending_tasks"],
                 completed_tasks=metrics["completed_tasks"],
+                in_progress_tasks=metrics["in_progress_tasks"],
+                skipped_tasks=metrics["skipped_tasks"],
                 total_earnings=metrics["total_earnings"],
                 page_title=await page.title(),
                 synced_at=timestamp,
                 final_url=final_url,
                 dashboard_html_path=html_path,
+                dashboard_screenshot_path=screenshot_path,
                 selector_diagnostics=diagnostics,
                 extracted_value_count=extracted_count,
                 http_status=http_status,
@@ -435,14 +570,62 @@ def _capture_dashboard_html(website_id: Optional[int], html: str) -> Optional[st
         return None
 
 
+async def _capture_dashboard_screenshot(page, website_id: Optional[int]) -> Optional[str]:
+    """Persist a visual snapshot whenever the dashboard structure is unfamiliar."""
+    try:
+        _DEBUG_HTML_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        path = _DEBUG_HTML_DIR / f"website_{website_id or 'unknown'}_{stamp}.png"
+        await page.screenshot(path=str(path), full_page=True, type="png")
+        return str(path)
+    except Exception as exc:
+        logger.error("Sync: failed to capture dashboard screenshot: %s", exc)
+        return None
+
+
+async def _wait_for_dashboard_ready(page) -> None:
+    """Wait for client-rendered dashboard content to appear and settle."""
+    try:
+        await page.wait_for_function(
+            """() => {
+                if (document.readyState !== 'complete' || !document.body) return false;
+                const text = (document.body.innerText || '').toLowerCase();
+                return /dashboard|balance|earning|task|gig|wallet/.test(text);
+            }""",
+            timeout=15_000,
+        )
+    except Exception:
+        logger.info("Sync: dashboard marker wait timed out; continuing with current DOM")
+
+    previous = ""
+    stable_rounds = 0
+    for _ in range(12):
+        try:
+            current = await page.locator("body").inner_text(timeout=2_000)
+        except Exception:
+            break
+        if current == previous and current:
+            stable_rounds += 1
+            if stable_rounds >= 2:
+                break
+        else:
+            stable_rounds = 0
+            previous = current
+        await page.wait_for_timeout(500)
+    logger.info("Sync: dashboard DOM settled stable_rounds=%d text_length=%d", stable_rounds, len(previous))
+
+
 async def _extract_dashboard_metrics(page) -> tuple[dict[str, Optional[float | int]], dict]:
-    """Extract all five dashboard metrics and return selector diagnostics."""
+    """Extract all dashboard metrics and return selector-level diagnostics."""
     definitions = {
         "available_balance": ("amount", _METRIC_LABELS["available_balance"]),
+        "pending_balance": ("amount", _METRIC_LABELS["pending_balance"]),
         "pending_tasks": ("count", _METRIC_LABELS["pending_tasks"]),
         "available_tasks": ("count", _METRIC_LABELS["available_tasks"]),
         "total_earnings": ("amount", _METRIC_LABELS["total_earnings"]),
         "completed_tasks": ("count", _METRIC_LABELS["completed_tasks"]),
+        "in_progress_tasks": ("count", _METRIC_LABELS["in_progress_tasks"]),
+        "skipped_tasks": ("count", _METRIC_LABELS["skipped_tasks"]),
     }
     metrics: dict[str, Optional[float | int]] = {}
     diagnostics: dict = {}
@@ -476,7 +659,21 @@ async def _extract_metric(
 
             for index in range(min(count, 3)):
                 text = (await locator.nth(index).inner_text()).strip()
-                value = _parse_metric_text(text, kind, labels, selector == "body")
+                strong_selector = any(
+                    token in selector.lower()
+                    for token in (
+                        "available-balance", "wallet", "total-earning", "earnings",
+                        "pending-task", "available-task", "completed",
+                        "in-progress", "active-task", "skipped", "declined",
+                    )
+                )
+                value = _parse_metric_text(
+                    text,
+                    kind,
+                    labels,
+                    selector in {"body", "main", '[role="main"]'},
+                    allow_unlabeled=strong_selector,
+                )
                 attempt = {
                     "selector": selector,
                     "matched": count,
@@ -514,7 +711,11 @@ async def _extract_metric(
 
 
 def _parse_metric_text(
-    text: str, kind: str, labels: tuple[str, ...], body_selector: bool
+    text: str,
+    kind: str,
+    labels: tuple[str, ...],
+    body_selector: bool,
+    allow_unlabeled: bool = True,
 ) -> Optional[float | int]:
     clean = re.sub(r"\s+", " ", text).strip()
     if not clean:
@@ -522,25 +723,25 @@ def _parse_metric_text(
 
     if kind == "amount":
         amount = r"\$?\s*([\d,]+(?:\.\d{1,2})?)"
-        if body_selector:
-            for label in labels:
-                match = re.search(rf"{label}[^\n$]{{0,100}}?{amount}", clean, re.IGNORECASE)
-                if not match:
-                    match = re.search(rf"{amount}[^\n$]{{0,100}}?{label}", clean, re.IGNORECASE)
-                if match:
-                    return _safe_float(match.group(1), 10_000_000)
+        for label in labels:
+            match = re.search(rf"{label}[^\n$]{{0,100}}?{amount}", clean, re.IGNORECASE)
+            if not match:
+                match = re.search(rf"{amount}[^\n$]{{0,100}}?{label}", clean, re.IGNORECASE)
+            if match:
+                return _safe_float(match.group(1), 10_000_000)
+        if body_selector or not allow_unlabeled:
             return None
         match = re.search(r"\$?\s*([\d,]+(?:\.\d{1,2})?)", clean)
         return _safe_float(match.group(1), 10_000_000) if match else None
 
     integer = r"([\d,]+)"
-    if body_selector:
-        for label in labels:
-            match = re.search(rf"{label}[^\d]{{0,100}}?{integer}", clean, re.IGNORECASE)
-            if not match:
-                match = re.search(rf"{integer}[^\d]{{0,100}}?{label}", clean, re.IGNORECASE)
-            if match:
-                return _safe_int(match.group(1), 10_000_000)
+    for label in labels:
+        match = re.search(rf"{label}[^\d]{{0,100}}?{integer}", clean, re.IGNORECASE)
+        if not match:
+            match = re.search(rf"{integer}[^\d]{{0,100}}?{label}", clean, re.IGNORECASE)
+        if match:
+            return _safe_int(match.group(1), 10_000_000)
+    if body_selector or not allow_unlabeled:
         return None
     match = re.search(integer, clean)
     return _safe_int(match.group(1), 10_000_000) if match else None
