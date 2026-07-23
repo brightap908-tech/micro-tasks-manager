@@ -7,40 +7,34 @@ databases:
 services:
   - type: web
     name: microtask-manager
-    runtime: python
-    # Build order matters:
-    #  1. Python packages  (gets the playwright Python library)
-    #  2. Playwright browsers  (downloads Chromium + OS system libs via apt)
-    #  3. Frontend  (React build)
-    # Browsers land in ~/.cache/ms-playwright, which Render preserves between
-    # build and run phases — no PLAYWRIGHT_BROWSERS_PATH override needed.
-    buildCommand: >-
-      pip install -r requirements.txt &&
-      python -m playwright install --with-deps chromium &&
-      cd frontend && npm install && npm run build
-    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+
+    # Docker runtime — required for Playwright/Chromium.
+    #
+    # Render's native Python runtime runs as a non-root user, so
+    # `playwright install --with-deps` cannot call apt-get to install the
+    # system libraries Chromium needs.  Docker runs as root during build,
+    # which lets --with-deps install every OS dependency automatically.
+    runtime: docker
+
+    # Render auto-detects ./Dockerfile.  All build steps live there:
+    #   1. Node 20  →  build React frontend (stage 1)
+    #   2. Python 3.11  →  pip install, playwright install --with-deps chromium
+    #   3. Copy built frontend into the Python image (stage 2)
+    #   4. CMD: uvicorn on $PORT
+
     envVars:
       - key: DATABASE_URL
         fromDatabase:
           name: microtask-db
           property: connectionString
 
-      # Fernet encryption key for auth_store (stored session cookies).
-      # Generate once:
-      #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-      # Paste the result into Render's Environment tab — never commit it.
+      # Fernet key for auth_store (encrypted session-cookie storage).
+      # Generate:  python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      # Paste into Render → Environment tab.  Never commit this value.
       - key: ENCRYPTION_KEY
         sync: false
 
       # Used by auth_store to derive the Fernet key for .auth_cookies.enc.
-      # Set any long random string in Render's Environment tab.
+      # Set any long random string in Render → Environment tab.
       - key: SESSION_SECRET
         sync: false
-
-      - key: PYTHON_VERSION
-        value: "3.11.0"
-
-      # NOTE: PLAYWRIGHT_BROWSERS_PATH is intentionally NOT set here.
-      # Playwright's default location (~/.cache/ms-playwright) is used,
-      # which Render's build disk preserves into the running container.
-      # Setting a non-default path caused the "Executable doesn't exist" error.

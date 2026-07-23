@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Node — only node_modules; the source is copied and rebuilt inside Docker
+node_modules/
+frontend/node_modules/
+
+# Frontend build output — rebuilt inside Docker from source
+frontend/dist/
+
+# Dev / test artefacts
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# Secrets and local config
+.env
+.env.*
+.auth_cookies.enc
+*.db
+*.db-shm
+*.db-wal
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Replit-specific
+.replit
+replit.nix
+.local/
+.cache/
+.upm/
+uv.lock
